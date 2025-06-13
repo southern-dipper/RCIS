@@ -52,7 +52,7 @@ def build_safe_state_graph(S_infinity, obstacle_indices):
 
 def a_star_on_safe_graph(start_indices, goal_xy_indices, safe_graph):
     """
-    在预构建的安全图上进行超高速A*搜索 - 优化版本
+    在预构建的安全图上进行A*搜索
     
     Args:
         start_indices: 起点状态索引
@@ -64,12 +64,9 @@ def a_star_on_safe_graph(start_indices, goal_xy_indices, safe_graph):
     """
     # 初始化统计信息
     search_stats = {
-        'mode': '图优化A*',
+        'mode': '安全图A*',
         'nodes_expanded': 0,
-        'nodes_in_open_set': 1,  # 起点已加入
-        'nodes_rejected_by_bounds': 0,
-        'nodes_rejected_by_safety': 0,  # 预构建图中此项为0
-        'nodes_rejected_by_collision': 0,  # 预构建图中此项为0
+        'nodes_in_open_set': 1,
         'path_length': 0,
         'success': False
     }
@@ -110,16 +107,13 @@ def a_star_on_safe_graph(start_indices, goal_xy_indices, safe_graph):
             search_stats['path_length'] = len(path)
             search_stats['success'] = True
             return path[::-1], search_stats
-        
-        # 核心优化：只处理预构建图中的直接邻居
+          # 核心优化：只处理预构建图中的直接邻居
         for neighbor_indices, omega in safe_graph[current_indices]:
-            # 跳过已经完全处理过的邻居
             if neighbor_indices in closed_set:
                 continue
                 
             tentative_g_score = g_score[current_indices] + 1
             
-            # 只有在找到更好路径时才更新
             if neighbor_indices not in g_score or tentative_g_score < g_score[neighbor_indices]:
                 came_from[neighbor_indices] = current_indices
                 g_score[neighbor_indices] = tentative_g_score
@@ -143,38 +137,26 @@ def get_next_state_indices_for_astar(state_indices, omega):
     next_indices = discretize_state(*next_continuous_state)
     return next_indices
 
-def a_star_search(start_indices, goal_xy_indices, S_infinity, obstacle_indices, use_robust_constraints=True):
+def a_star_search(start_indices, goal_xy_indices, obstacle_indices):
     """
-    A*搜索算法，支持鲁棒约束和基线模式对比
+    标准A*搜索算法
     
     Args:
         start_indices: 起点离散索引
         goal_xy_indices: 目标点xy索引
-        S_infinity: 鲁棒安全集
         obstacle_indices: 障碍物索引
-        use_robust_constraints: 是否使用鲁棒安全集约束 (True=鲁棒A*, False=基线A*)
     
     Returns:
         tuple: (path, search_stats) 包含路径和搜索统计信息
     """
-    mode_name = "鲁棒A*" if use_robust_constraints else "基线A*"
-    
     # 初始化统计信息
     search_stats = {
-        'mode': mode_name,
+        'mode': '标准A*',
         'nodes_expanded': 0,
         'nodes_in_open_set': 0,
-        'nodes_rejected_by_bounds': 0,
-        'nodes_rejected_by_safety': 0,
-        'nodes_rejected_by_collision': 0,
         'path_length': 0,
         'success': False
     }
-    
-    # 鲁棒模式下检查起点安全性
-    if use_robust_constraints and start_indices not in S_infinity:
-        print("错误：起点不在鲁棒安全集内！")
-        return None, search_stats
 
     open_set = []
     heapq.heappush(open_set, (0, start_indices))
@@ -188,7 +170,6 @@ def a_star_search(start_indices, goal_xy_indices, S_infinity, obstacle_indices, 
         search_stats['nodes_expanded'] += 1
         
         if (current_indices[0], current_indices[1]) == goal_xy_indices:
-            print("成功找到路径！")
             path = []
             while current_indices in came_from:
                 path.append(current_indices)
@@ -201,22 +182,14 @@ def a_star_search(start_indices, goal_xy_indices, S_infinity, obstacle_indices, 
         for omega in omega_space:
             neighbor_indices = get_next_state_indices_for_astar(current_indices, omega)
             
-            # 边界检查（两种模式都需要）
+            # 边界检查
             if neighbor_indices is None:
-                search_stats['nodes_rejected_by_bounds'] += 1
                 continue
             
-            # 安全集约束检查（仅鲁棒模式）
-            if use_robust_constraints:
-                if neighbor_indices not in S_infinity:
-                    search_stats['nodes_rejected_by_safety'] += 1
-                    continue
-            
-            # 路径碰撞检查（两种模式都需要）
+            # 路径碰撞检查
             current_state = indices_to_state(*current_indices)
             neighbor_state = indices_to_state(*neighbor_indices)
             if check_path_collision(current_state, neighbor_state, obstacle_indices):
-                search_stats['nodes_rejected_by_collision'] += 1
                 continue
 
             tentative_g_score = g_score[current_indices] + 1
@@ -228,35 +201,25 @@ def a_star_search(start_indices, goal_xy_indices, S_infinity, obstacle_indices, 
                 heapq.heappush(open_set, (f_score[neighbor_indices], neighbor_indices))
                 search_stats['nodes_in_open_set'] += 1
 
-    print("未能找到路径。")
     return None, search_stats
 
 def compare_astar_methods(start_indices, goal_xy_indices, S_infinity, obstacle_indices):
     """
-    对比三种A*方法的性能：基线A*、当前鲁棒A*、图优化A*
+    对比两种A*方法的性能：标准A*、安全图A*
     
     Returns:
-        dict: 包含三种方法的结果和统计对比
+        dict: 包含两种方法的结果和统计对比
     """
-    print("A*算法性能对比...")
-    
     results = {}
     
-    # 1. 运行基线A*
+    # 1. 运行标准A*
     start_time = time.time()
-    baseline_path, baseline_stats = a_star_search(start_indices, goal_xy_indices, S_infinity, obstacle_indices, use_robust_constraints=False)
+    baseline_path, baseline_stats = a_star_search(start_indices, goal_xy_indices, obstacle_indices)
     baseline_time = time.time() - start_time
     baseline_stats['computation_time'] = baseline_time
     results['baseline'] = {'path': baseline_path, 'stats': baseline_stats}
     
-    # 2. 运行当前鲁棒A*
-    start_time = time.time()
-    robust_path, robust_stats = a_star_search(start_indices, goal_xy_indices, S_infinity, obstacle_indices, use_robust_constraints=True)
-    robust_time = time.time() - start_time
-    robust_stats['computation_time'] = robust_time
-    results['robust'] = {'path': robust_path, 'stats': robust_stats}
-    
-    # 3. 预构建安全图
+    # 2. 预构建安全图
     graph_build_start = time.time()
     safe_graph = build_safe_state_graph(S_infinity, obstacle_indices)
     graph_build_time = time.time() - graph_build_start
@@ -264,7 +227,7 @@ def compare_astar_methods(start_indices, goal_xy_indices, S_infinity, obstacle_i
     # 计算图的边数
     graph_edges = sum(len(neighbors) for neighbors in safe_graph.values())
     
-    # 4. 运行图优化A*
+    # 3. 运行安全图A*
     start_time = time.time()
     graph_path, graph_stats = a_star_on_safe_graph(start_indices, goal_xy_indices, safe_graph)
     graph_search_time = time.time() - start_time

@@ -7,7 +7,7 @@ from config import *
 from core_models import *
 
 def compute_robust_safe_set_optimized(obstacle_indices, W):
-    """计算鲁棒安全集 - 用于构建安全图"""
+    """优化的串行版本"""    
     # 预计算常用值
     omega_list = list(omega_space)
     W_array = np.array(W)
@@ -31,10 +31,9 @@ def compute_robust_safe_set_optimized(obstacle_indices, W):
             
         Sk_plus_1 = set()
         
-        # 对每个状态检查是否存在鲁棒安全动作
+        # 优化的串行计算
         for s_indices in tqdm(Sk, desc=f"迭代 {k}", ncols=100):
             s_center = np.array([x_space[s_indices[0]], y_space[s_indices[1]], theta_space[s_indices[2]]])
-            exists_robust_action = False
             
             # 对每个动作检查是否鲁棒安全
             for omega in omega_list:
@@ -62,11 +61,8 @@ def compute_robust_safe_set_optimized(obstacle_indices, W):
                         break
                 
                 if is_action_robustly_safe:
-                    exists_robust_action = True
+                    Sk_plus_1.add(s_indices)
                     break
-            
-            if exists_robust_action:
-                Sk_plus_1.add(s_indices)
         
         # 检查收敛
         if Sk_plus_1 == Sk:
