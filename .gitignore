@@ -77,3 +77,11 @@ Desktop.ini
 
 # 技术报告
 技术报告*.md
+
+# 图像输出文件
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.svg
+*.pdf

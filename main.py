@@ -49,14 +49,9 @@ def main():
     # 生成并打印性能指标
     metrics = generate_performance_metrics(comparison_results)
     print_academic_results_table(metrics)
-    
-    # 选择用于可视化的路径
-    if comparison_results['graph_optimized']['path'] is not None:
-        path_indices = comparison_results['graph_optimized']['path']
-    elif comparison_results['baseline']['path'] is not None:
-        path_indices = comparison_results['baseline']['path']
-    else:
-        path_indices = None
+      # 选择用于可视化的路径
+    baseline_path = comparison_results['baseline']['path']
+    graph_path = comparison_results['graph_optimized']['path']
 
     # 3. 计算安全角度统计
     safe_angle_count = {}
@@ -67,10 +62,11 @@ def main():
         if key not in safe_angle_count:
             safe_angle_count[key] = 0
         safe_angle_count[key] += 1
-    
-    # 4. 生成路径规划可视化
-    create_original_path_visualization(S_infinity, obstacle_indices, path_indices, 
+      # 4. 生成路径规划可视化
+    create_original_path_visualization(S_infinity, obstacle_indices, baseline_path, graph_path,
                                        start_continuous, goal_continuous, safe_angle_count)
+      # 5. 生成安全角度箭头可视化
+    create_safety_angle_visualization(S_infinity, obstacle_indices, start_continuous, goal_continuous)
 
 if __name__ == "__main__":
     main()

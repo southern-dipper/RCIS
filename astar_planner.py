@@ -61,14 +61,15 @@ def a_star_on_safe_graph(start_indices, goal_xy_indices, safe_graph):
     
     Returns:
         tuple: (path, search_stats)
-    """
-    # 初始化统计信息
+    """    # 初始化统计信息
     search_stats = {
         'mode': '安全图A*',
         'nodes_expanded': 0,
         'nodes_in_open_set': 1,
         'path_length': 0,
-        'success': False
+        'success': False,
+        'total_branches_explored': 0,  # 总分支数
+        'avg_branches_per_node': 0     # 平均每节点分支数
     }
     
     if start_indices not in safe_graph:
@@ -106,9 +107,16 @@ def a_star_on_safe_graph(start_indices, goal_xy_indices, safe_graph):
             path.append(start_indices)
             search_stats['path_length'] = len(path)
             search_stats['success'] = True
+            # 计算平均分支数
+            if search_stats['nodes_expanded'] > 0:
+                search_stats['avg_branches_per_node'] = search_stats['total_branches_explored'] / search_stats['nodes_expanded']
             return path[::-1], search_stats
-          # 核心优化：只处理预构建图中的直接邻居
-        for neighbor_indices, omega in safe_graph[current_indices]:
+          
+        # 核心优化：只处理预构建图中的直接邻居
+        neighbors_in_graph = safe_graph[current_indices]
+        search_stats['total_branches_explored'] += len(neighbors_in_graph)
+        
+        for neighbor_indices, omega in neighbors_in_graph:
             if neighbor_indices in closed_set:
                 continue
                 
@@ -123,6 +131,9 @@ def a_star_on_safe_graph(start_indices, goal_xy_indices, safe_graph):
                 search_stats['nodes_in_open_set'] += 1
     
     print("未能找到路径。")
+    # 计算平均分支数
+    if search_stats['nodes_expanded'] > 0:
+        search_stats['avg_branches_per_node'] = search_stats['total_branches_explored'] / search_stats['nodes_expanded']
     return None, search_stats
 
 def get_next_state_indices_for_astar(state_indices, omega):
@@ -148,14 +159,15 @@ def a_star_search(start_indices, goal_xy_indices, obstacle_indices):
     
     Returns:
         tuple: (path, search_stats) 包含路径和搜索统计信息
-    """
-    # 初始化统计信息
+    """    # 初始化统计信息
     search_stats = {
         'mode': '标准A*',
         'nodes_expanded': 0,
         'nodes_in_open_set': 0,
         'path_length': 0,
-        'success': False
+        'success': False,
+        'total_branches_explored': 0,  # 总分支数
+        'avg_branches_per_node': 0     # 平均每节点分支数
     }
 
     open_set = []
@@ -177,8 +189,11 @@ def a_star_search(start_indices, goal_xy_indices, obstacle_indices):
             path.append(start_indices)
             search_stats['path_length'] = len(path)
             search_stats['success'] = True
-            return path[::-1], search_stats
-
+            # 计算平均分支数
+            if search_stats['nodes_expanded'] > 0:
+                search_stats['avg_branches_per_node'] = search_stats['total_branches_explored'] / search_stats['nodes_expanded']
+            return path[::-1], search_stats        # 统计所有尝试的分支数（omega_space中的所有动作）
+        valid_branches = 0
         for omega in omega_space:
             neighbor_indices = get_next_state_indices_for_astar(current_indices, omega)
             
@@ -192,6 +207,9 @@ def a_star_search(start_indices, goal_xy_indices, obstacle_indices):
             if check_path_collision(current_state, neighbor_state, obstacle_indices):
                 continue
 
+            # 这是一个有效的分支
+            valid_branches += 1
+            
             tentative_g_score = g_score[current_indices] + 1
             
             if neighbor_indices not in g_score or tentative_g_score < g_score[neighbor_indices]:
@@ -200,7 +218,12 @@ def a_star_search(start_indices, goal_xy_indices, obstacle_indices):
                 f_score[neighbor_indices] = tentative_g_score + heuristic(neighbor_indices, (*goal_xy_indices, 0))
                 heapq.heappush(open_set, (f_score[neighbor_indices], neighbor_indices))
                 search_stats['nodes_in_open_set'] += 1
+          # 记录这个节点的分支数
+        search_stats['total_branches_explored'] += valid_branches
 
+    # 计算平均分支数
+    if search_stats['nodes_expanded'] > 0:
+        search_stats['avg_branches_per_node'] = search_stats['total_branches_explored'] / search_stats['nodes_expanded']
     return None, search_stats
 
 def compare_astar_methods(start_indices, goal_xy_indices, S_infinity, obstacle_indices):
