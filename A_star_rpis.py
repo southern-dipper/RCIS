@@ -67,10 +67,13 @@ def indices_to_state(ix, iy, itheta):
     return np.array([x_space[ix], y_space[iy], theta_space[itheta]])
 
 def unicycle_model(state, omega):
+    """Unicycle运动学模型 - 使用中点积分方法提高精度"""
     x, y, theta = state
-    x_next = x + V * np.cos(theta) * DT
-    y_next = y + V * np.sin(theta) * DT
     theta_next = theta + omega * DT
+    theta_mid = theta + omega * DT / 2
+    x_next = x + V * np.cos(theta_next) * DT
+    y_next = y + V * np.sin(theta_next) * DT
+    
     return np.array([x_next, y_next, theta_next])
 
 def check_path_collision(start_state, end_state, obstacle_indices):
@@ -249,129 +252,6 @@ def compute_robust_safe_set_optimized(obstacle_indices, W):
 
 # --- 3. A* 路径规划算法 ---
 
-def build_safe_state_graph(S_infinity, obstacle_indices):
-    """
-    预构建安全状态图：一次构建，多次查询
-    
-    Args:
-        S_infinity: 鲁棒安全集
-        obstacle_indices: 障碍物索引集合
-    
-    Returns:
-        dict: {state_indices: [(neighbor_indices, omega), ...]}
-              每个安全状态映射到其所有安全邻居及对应动作
-    """
-    print("构建安全状态图...")
-    
-    safe_graph = {}
-    total_edges = 0
-    
-    for state_indices in tqdm(S_infinity, desc="构建图"):
-        neighbors = []
-        current_state = indices_to_state(*state_indices)
-        
-        for omega in omega_space:
-            next_state = unicycle_model(current_state, omega)
-            
-            # 边界检查
-            if not is_state_valid(next_state[0], next_state[1]):
-                continue
-                
-            next_indices = discretize_state(*next_state)
-            
-            # 关键：只有当下一状态也在安全集内时才添加连接
-            if next_indices in S_infinity:
-                neighbors.append((next_indices, omega))
-                total_edges += 1
-        
-        safe_graph[state_indices] = neighbors
-      # 统计图的性质
-    avg_degree = total_edges / len(safe_graph) if safe_graph else 0
-    print(f"图构建完成: {len(safe_graph)}节点, {total_edges}边")
-    
-    return safe_graph
-
-def a_star_on_safe_graph(start_indices, goal_xy_indices, safe_graph):
-    """
-    在预构建的安全图上进行超高速A*搜索 - 优化版本
-    
-    Args:
-        start_indices: 起点状态索引
-        goal_xy_indices: 目标xy位置索引
-        safe_graph: 预构建的安全状态图
-    
-    Returns:
-        tuple: (path, search_stats)
-    """
-    # 初始化统计信息
-    search_stats = {
-        'mode': '图优化A*',
-        'nodes_expanded': 0,
-        'nodes_in_open_set': 1,  # 起点已加入
-        'nodes_rejected_by_bounds': 0,
-        'nodes_rejected_by_safety': 0,  # 预构建图中此项为0
-        'nodes_rejected_by_collision': 0,  # 预构建图中此项为0
-        'path_length': 0,
-        'success': False
-    }
-    
-    if start_indices not in safe_graph:
-        print("错误：起点不在安全图中！")
-        return None, search_stats
-    
-    open_set = []
-    counter = 0  # 用于打破堆中的平局
-    heapq.heappush(open_set, (0, counter, start_indices))
-    counter += 1
-    
-    came_from = {}
-    g_score = {start_indices: 0}
-    f_score = {start_indices: heuristic(start_indices, (*goal_xy_indices, 0))}
-    closed_set = set()
-    
-    while open_set:
-        _, _, current_indices = heapq.heappop(open_set)
-        
-        # 重要：如果已经处理过这个节点，跳过
-        if current_indices in closed_set:
-            continue
-        
-        # 标记为已处理
-        closed_set.add(current_indices)
-        search_stats['nodes_expanded'] += 1
-        
-        # 目标检测
-        if (current_indices[0], current_indices[1]) == goal_xy_indices:
-            print("成功找到路径！")
-            path = []
-            while current_indices in came_from:
-                path.append(current_indices)
-                current_indices = came_from[current_indices]
-            path.append(start_indices)
-            search_stats['path_length'] = len(path)
-            search_stats['success'] = True
-            return path[::-1], search_stats
-        
-        # 核心优化：只处理预构建图中的直接邻居
-        for neighbor_indices, omega in safe_graph[current_indices]:
-            # 跳过已经完全处理过的邻居
-            if neighbor_indices in closed_set:
-                continue
-                
-            tentative_g_score = g_score[current_indices] + 1
-            
-            # 只有在找到更好路径时才更新
-            if neighbor_indices not in g_score or tentative_g_score < g_score[neighbor_indices]:
-                came_from[neighbor_indices] = current_indices
-                g_score[neighbor_indices] = tentative_g_score
-                f_score[neighbor_indices] = tentative_g_score + heuristic(neighbor_indices, (*goal_xy_indices, 0))
-                heapq.heappush(open_set, (f_score[neighbor_indices], counter, neighbor_indices))
-                counter += 1
-                search_stats['nodes_in_open_set'] += 1
-    
-    print("未能找到路径。")
-    return None, search_stats
-
 def get_next_state_indices_for_astar(state_indices, omega):
     """A*使用确定性模型（无扰动）进行路径搜索"""
     current_state = indices_to_state(*state_indices)
@@ -477,10 +357,112 @@ def a_star_search(start_indices, goal_xy_indices, S_infinity, obstacle_indices, 
     print("未能找到路径。")
     return None, search_stats
 
-def create_original_path_visualization(S_infinity, obstacle_indices, path_indices, start_continuous, goal_continuous, safe_angle_count):
-    """恢复原来的单独大图可视化"""
-    # 创建原来的大图
-    fig, ax = plt.subplots(figsize=(12, 8))
+# --- 3. 辅助函数定义 ---
+
+def compare_astar_methods(start_indices, goal_xy_indices, S_infinity, obstacle_indices):
+    """
+    对比两种A*方法的性能：基线A*和鲁棒A*
+    Returns:
+        dict: 包含两种方法的结果和统计对比
+    """
+    print("A*算法性能对比...")
+    results = {}
+    # 1. 运行基线A*
+    print("运行基线A*...")
+    start_time = time.time()
+    baseline_path, baseline_stats = a_star_search(start_indices, goal_xy_indices, S_infinity, obstacle_indices, use_robust_constraints=False)
+    baseline_time = time.time() - start_time
+    baseline_stats['computation_time'] = baseline_time
+    results['baseline'] = {'path': baseline_path, 'stats': baseline_stats}
+    # 2. 运行鲁棒A*
+    print("运行鲁棒A*...")
+    start_time = time.time()
+    robust_path, robust_stats = a_star_search(start_indices, goal_xy_indices, S_infinity, obstacle_indices, use_robust_constraints=True)
+    robust_time = time.time() - start_time
+    robust_stats['computation_time'] = robust_time
+    results['robust'] = {'path': robust_path, 'stats': robust_stats}
+    print_comparison_results(baseline_stats, robust_stats)
+    return results
+
+def print_comparison_results(baseline_stats, robust_stats):
+    print("\n" + "="*80)
+    print("基线A* vs 鲁棒A* 性能对比")
+    print("="*80)
+    print(f"{'指标':<20} {'基线A*':<15} {'鲁棒A*':<15}")
+    print("-" * 50)
+    baseline_success = "✓" if baseline_stats['success'] else "✗"
+    robust_success = "✓" if robust_stats['success'] else "✗"
+    print(f"{'成功找到路径':<20} {baseline_success:<15} {robust_success:<15}")
+    baseline_time = baseline_stats['computation_time']
+    robust_time = robust_stats['computation_time']
+    print(f"{'搜索时间(秒)':<20} {baseline_time:<15.4f} {robust_time:<15.4f}")
+    baseline_expanded = baseline_stats['nodes_expanded']
+    robust_expanded = robust_stats['nodes_expanded']
+    print(f"{'扩展节点数':<20} {baseline_expanded:<15} {robust_expanded:<15}")
+    print(f"{'边界外拒绝':<20} {baseline_stats['nodes_rejected_by_bounds']:<15} {robust_stats['nodes_rejected_by_bounds']:<15}")
+    print(f"{'安全性拒绝':<20} {baseline_stats['nodes_rejected_by_safety']:<15} {robust_stats['nodes_rejected_by_safety']:<15}")
+    print(f"{'碰撞拒绝':<20} {baseline_stats['nodes_rejected_by_collision']:<15} {robust_stats['nodes_rejected_by_collision']:<15}")
+    if baseline_stats['success'] and robust_stats['success']:
+        baseline_length = baseline_stats['path_length']
+        robust_length = robust_stats['path_length']
+        print(f"{'路径长度':<20} {baseline_length:<15} {robust_length:<15}")
+        if baseline_length > 0:
+            quality_ratio = robust_length / baseline_length
+            print(f"{'路径质量比':<20} {'1.00':<15} {quality_ratio:<15.2f}")
+    print("-" * 50)
+    if baseline_time > 0 and robust_time > 0:
+        if robust_time < baseline_time:
+            speedup = baseline_time / robust_time
+            print(f"性能提升: 鲁棒A*比基线A*快 {speedup:.1f}x")
+        elif robust_time > baseline_time:
+            slowdown = robust_time / baseline_time
+            print(f"性能代价: 鲁棒A*比基线A*慢 {slowdown:.1f}x")
+        else:
+            print("性能相当")
+    if robust_stats['success']:
+        if robust_stats['nodes_rejected_by_safety'] > 0:
+            print(f"安全保障: 鲁棒A*拒绝了 {robust_stats['nodes_rejected_by_safety']} 个不安全状态")
+        else:
+            print("安全保障: 所有搜索状态均在安全集内")
+    print("="*80)
+
+def get_path_cells_and_trajectory(path_indices, came_from=None):
+    if not path_indices:
+        return set(), []
+    path_cells = set()
+    continuous_trajectory = []
+    current_state = indices_to_state(*path_indices[0])
+    continuous_trajectory.append(current_state[:2])
+    path_cells.add((path_indices[0][0], path_indices[0][1]))
+    for i in range(1, len(path_indices)):
+        prev_discrete_state = indices_to_state(*path_indices[i-1])
+        curr_discrete_state = indices_to_state(*path_indices[i])
+        best_omega = 0
+        min_distance = float('inf')
+        for omega in omega_space:
+            predicted_next = unicycle_model(prev_discrete_state, omega)
+            distance = np.sqrt((predicted_next[0] - curr_discrete_state[0])**2 + (predicted_next[1] - curr_discrete_state[1])**2)
+            if distance < min_distance:
+                min_distance = distance
+                best_omega = omega
+        actual_next_state = unicycle_model(prev_discrete_state, best_omega)
+        continuous_trajectory.append(actual_next_state[:2])
+        x1, y1 = prev_discrete_state[0], prev_discrete_state[1]
+        x2, y2 = actual_next_state[0], actual_next_state[1]
+        distance = np.sqrt((x2-x1)**2 + (y2-y1)**2)
+        num_samples = max(int(distance / (min(X_STEP, Y_STEP) * 0.2)), 10)
+        for j in range(num_samples + 1):
+            t = j / max(num_samples, 1)
+            x_sample = x1 + t * (x2 - x1)
+            y_sample = y1 + t * (y2 - y1)
+            sample_indices = discretize_state(x_sample, y_sample, 0)
+            path_cells.add((sample_indices[0], sample_indices[1]))
+    return path_cells, continuous_trajectory
+
+def create_original_path_visualization(S_infinity, obstacle_indices, baseline_path, robust_path, start_continuous, goal_continuous, safe_angle_count):
+    """路径规划可视化 - 支持双路径对比显示"""
+    # 创建大图，增大尺寸和DPI
+    fig, ax = plt.subplots(figsize=(16, 12), dpi=150)
     
     max_angles = len(theta_space)
     
@@ -520,43 +502,56 @@ def create_original_path_visualization(S_infinity, obstacle_indices, path_indice
     # 添加颜色条
     cbar = plt.colorbar(im, ax=ax, shrink=0.8)
     cbar.set_label('鲁棒安全角度数', rotation=270, labelpad=20)
-    
-    # 绘制路径
-    if path_indices:
+      # 绘制基线A*路径
+    if baseline_path:
         # 获取完整的路径格子和连续轨迹
-        path_cells, continuous_trajectory = get_path_cells_and_trajectory(path_indices)
+        baseline_cells, baseline_trajectory = get_path_cells_and_trajectory(baseline_path)
+        
+        # 绘制基线A*的连续轨迹
+        trajectory_array = np.array(baseline_trajectory)
+        ax.plot(trajectory_array[:, 0], trajectory_array[:, 1], 
+                color='#D32F2F', linewidth=3, label='标准A*轨迹', alpha=0.9)
+        
+        # 绘制关键点
+        path_states = np.array([indices_to_state(*p) for p in baseline_path])
+        ax.plot(path_states[:, 0], path_states[:, 1], 
+                color='#F44336', marker='s', markersize=4, linewidth=0, 
+                label='标准A*路径点', alpha=0.8)
+    
+    # 绘制鲁棒A*路径  
+    if robust_path:
+        # 获取完整的路径格子和连续轨迹
+        robust_cells, robust_trajectory = get_path_cells_and_trajectory(robust_path)
         
         # 绘制所有路径经过的格子
-        for ix, iy in path_cells:
+        for ix, iy in robust_cells:
             rect = patches.Rectangle(
                 (x_space[ix] - X_STEP/2, y_space[iy] - Y_STEP/2), 
                 X_STEP, Y_STEP, 
-                facecolor='#E57373', alpha=0.7, edgecolor='red', linewidth=1
-            )
+                facecolor="#59A8F6FF", alpha=0.6, edgecolor="#5490F7FF", linewidth=1            )
             ax.add_patch(rect)
         
         # 绘制实际的连续轨迹
-        trajectory_array = np.array(continuous_trajectory)
+        trajectory_array = np.array(robust_trajectory)
         ax.plot(trajectory_array[:, 0], trajectory_array[:, 1], 
-                color='#B71C1C', linewidth=3, label='A*轨迹', alpha=0.9)
+                color="#0741FF", linewidth=3, label='安全A*轨迹', alpha=0.9)
         
-        # 绘制关键点（A*路径节点）
-        path_states = np.array([indices_to_state(*p) for p in path_indices])
+        # 绘制关键点
+        path_states = np.array([indices_to_state(*p) for p in robust_path])
         ax.plot(path_states[:, 0], path_states[:, 1], 
-                color='#D32F2F', marker='o', markersize=4, linewidth=0, 
-                label='离散路径点', alpha=0.8)
+                color="#0521F1E9", marker='o', markersize=4, linewidth=0, 
+                label='安全A*路径点', alpha=0.8)
         
         # 绘制方向箭头（每隔几个点绘制一个）
         for i in range(0, len(path_states), 2):  # 每隔2个点绘制一个箭头
             state = path_states[i]
             ax.arrow(state[0], state[1], 
                      0.4 * np.cos(state[2]), 0.4 * np.sin(state[2]), 
-                     head_width=0.2, head_length=0.2, fc='#B71C1C', ec='#B71C1C', alpha=0.8)
+                     head_width=0.2, head_length=0.2, fc="#070FFF", ec="#071CFF", alpha=0.8)
     
     ax.plot(start_continuous[0], start_continuous[1], marker='o', color='green', markersize=12, label='起点')
     ax.plot(goal_continuous[0], goal_continuous[1], marker='*', color='blue', markersize=18, label='终点')
-    
-    # 添加网格线
+      # 添加网格线
     for x in x_space:
         ax.axvline(x - X_STEP/2, color='gray', linewidth=0.5, alpha=0.7)
         ax.axvline(x + X_STEP/2, color='gray', linewidth=0.5, alpha=0.7)
@@ -569,282 +564,132 @@ def create_original_path_visualization(S_infinity, obstacle_indices, path_indice
     
     # 创建图例元素
     legend_patches = [
-        patches.Patch(color='#E8F5E8', label='低鲁棒性'),
-        patches.Patch(color='#66BB6A', label='高鲁棒性'), 
         patches.Patch(color='#000000', label='障碍物'),
-        patches.Patch(color='#E57373', label='路径覆盖')
+        patches.Patch(color='#59A8F6FF', label='路径覆盖')
     ]
     
     # 获取线条图例
     handles, labels = ax.get_legend_handles_labels()
-    
     # 将图例放在图形外部右侧
     ax.legend(handles=handles + legend_patches, 
              bbox_to_anchor=(1.35, 1), loc='upper left')
-
     ax.set_xlim(X_MIN - 1, X_MAX + 1)
     ax.set_ylim(Y_MIN - 1, Y_MAX + 1)
     ax.set_aspect('equal', adjustable='box')
-    ax.set_title('基于鲁棒前向不变集的独轮车机器人路径规划\n'
-                '离散时间鲁棒可达性分析与扰动处理')
+    ax.set_title('基于安全状态转移图的独轮车路径规划', fontsize=16, fontweight='bold')
     plt.tight_layout()
+    
+    # 保存高分辨率图片
+    plt.savefig('path_planning_comparison.png', dpi=300, bbox_inches='tight', facecolor='white')
     plt.show()
 
-def get_path_cells_and_trajectory(path_indices, came_from=None):
-    """获取路径经过的所有格子和实际连续轨迹"""
-    if not path_indices:
-        return set(), []
+def create_safety_angle_visualization(S_infinity, obstacle_indices, start_continuous, goal_continuous):
+    """创建安全角度箭头可视化图 - 展示θ维度信息"""
     
-    path_cells = set()
-    continuous_trajectory = []
+    # 创建超大图形以便看清箭头
+    fig, ax = plt.subplots(figsize=(20, 16), dpi=150)
     
-    # 第一个点：起始状态
-    current_state = indices_to_state(*path_indices[0])
-    continuous_trajectory.append(current_state[:2])
-    path_cells.add((path_indices[0][0], path_indices[0][1]))
+    # 计算每个位置的安全角度
+    position_safety = {}
+    for ix, iy, itheta in S_infinity:
+        key = (ix, iy)
+        if key not in position_safety:
+            position_safety[key] = set()
+        position_safety[key].add(itheta)
     
-    # 从第二个点开始，通过unicycle模型生成真正的连续轨迹
-    for i in range(1, len(path_indices)):
-        prev_discrete_state = indices_to_state(*path_indices[i-1])
-        curr_discrete_state = indices_to_state(*path_indices[i])
-        
-        # 计算使用的omega（通过逆向计算）
-        # 从prev_discrete_state开始，找到能到达curr_discrete_state附近的omega
-        best_omega = 0
-        min_distance = float('inf')
-        
-        for omega in omega_space:
-            predicted_next = unicycle_model(prev_discrete_state, omega)
-            distance = np.sqrt((predicted_next[0] - curr_discrete_state[0])**2 + 
-                             (predicted_next[1] - curr_discrete_state[1])**2)
-            if distance < min_distance:
-                min_distance = distance
-                best_omega = omega
-        
-        # 使用找到的omega生成真正的连续轨迹点
-        actual_next_state = unicycle_model(prev_discrete_state, best_omega)
-        continuous_trajectory.append(actual_next_state[:2])
-        
-        # 在连续轨迹上密集采样，找到所有经过的格子
-        x1, y1 = prev_discrete_state[0], prev_discrete_state[1]
-        x2, y2 = actual_next_state[0], actual_next_state[1]
-        
-        # 计算应该有多少个采样点
-        distance = np.sqrt((x2-x1)**2 + (y2-y1)**2)
-        num_samples = max(int(distance / (min(X_STEP, Y_STEP) * 0.2)), 10)
-        
-        for j in range(num_samples + 1):
-            t = j / max(num_samples, 1)
-            x_sample = x1 + t * (x2 - x1)
-            y_sample = y1 + t * (y2 - y1)
+    # 设置箭头长度（稍微大一些以便看清）
+    arrow_length = min(X_STEP, Y_STEP) * 0.35
+    
+    # 为每个格点绘制箭头
+    for ix in range(len(x_space)):
+        for iy in range(len(y_space)):
+            x_pos = x_space[ix]
+            y_pos = y_space[iy]
             
-            # 将采样点转换为格子索引
-            sample_indices = discretize_state(x_sample, y_sample, 0)
-            path_cells.add((sample_indices[0], sample_indices[1]))
-    
-    return path_cells, continuous_trajectory        
-def compare_astar_methods(start_indices, goal_xy_indices, S_infinity, obstacle_indices):
-    """
-    对比三种A*方法的性能：基线A*、当前鲁棒A*、图优化A*
-    
-    Returns:
-        dict: 包含三种方法的结果和统计对比
-    """
-    print("A*算法性能对比...")
-    
-    results = {}
-    
-    # 1. 运行基线A*
-    start_time = time.time()
-    baseline_path, baseline_stats = a_star_search(start_indices, goal_xy_indices, S_infinity, obstacle_indices, use_robust_constraints=False)
-    baseline_time = time.time() - start_time
-    baseline_stats['computation_time'] = baseline_time
-    results['baseline'] = {'path': baseline_path, 'stats': baseline_stats}
-      # 2. 运行当前鲁棒A*
-    start_time = time.time()
-    robust_path, robust_stats = a_star_search(start_indices, goal_xy_indices, S_infinity, obstacle_indices, use_robust_constraints=True)
-    robust_time = time.time() - start_time
-    robust_stats['computation_time'] = robust_time
-    results['robust'] = {'path': robust_path, 'stats': robust_stats}
-    
-    # 3. 预构建安全图
-    graph_build_start = time.time()
-    safe_graph = build_safe_state_graph(S_infinity, obstacle_indices)
-    graph_build_time = time.time() - graph_build_start
-    
-    # 计算图的边数
-    graph_edges = sum(len(neighbors) for neighbors in safe_graph.values())
-    
-    # 4. 运行图优化A*
-    start_time = time.time()
-    graph_path, graph_stats = a_star_on_safe_graph(start_indices, goal_xy_indices, safe_graph)
-    graph_search_time = time.time() - start_time
-    graph_stats['computation_time'] = graph_search_time
-    graph_stats['graph_build_time'] = graph_build_time
-    graph_stats['total_time'] = graph_build_time + graph_search_time
-    results['graph_optimized'] = {'path': graph_path, 'stats': graph_stats}
-      # 添加内存计算所需的额外信息
-    results['safe_set'] = S_infinity
-    results['graph_edges_count'] = graph_edges
-    
-    # 5. 生成并打印专业性能指标
-    metrics = generate_performance_metrics(results)
-    print_academic_results_table(metrics)
-    
-    return results
-
-
-def generate_performance_metrics(results):
-    """生成专业的性能指标"""
-    metrics = {
-        'computational_efficiency': {},
-        'algorithmic_performance': {},
-        'safety_metrics': {}
-    }
-    
-    # 获取安全集大小和图边数
-    safe_set_size = len(results.get('safe_set', set()))
-    graph_edges_count = results.get('graph_edges_count', 0)
-    
-    # 计算效率指标
-    for method_name, result in results.items():
-        # 跳过非算法结果的键
-        if method_name in ['safe_set', 'graph_edges_count']:
-            continue
+            # 检查是否是障碍物
+            if (ix, iy) in obstacle_indices:
+                # 绘制障碍物格子
+                rect = patches.Rectangle(
+                    (x_pos - X_STEP/2, y_pos - Y_STEP/2), 
+                    X_STEP, Y_STEP, 
+                    facecolor='black', alpha=0.8, edgecolor='gray'
+                )
+                ax.add_patch(rect)
+                continue
             
-        stats = result['stats']
-        
-        # 计算内存占用：不同算法的实际存储需求
-        if method_name == 'baseline':
-            # 基线A*：只需维护开放集
-            memory_usage = stats['nodes_in_open_set']
-        elif method_name == 'robust':
-            # 鲁棒A*：需要存储完整安全集 + 开放集
-            memory_usage = safe_set_size
-        elif method_name == 'graph_optimized':
-            # 图优化A*：需要存储图的边连接 + 开放集
-            memory_usage = graph_edges_count
-        else:
-            memory_usage = stats['nodes_in_open_set']
-        
-        # 搜索效率（仅搜索阶段）
-        metrics['computational_efficiency'][method_name] = {
-            'search_time_ms': stats['computation_time'] * 1000,
-            'nodes_expanded': stats['nodes_expanded'],
-            'nodes_per_second': stats['nodes_expanded'] / max(stats['computation_time'], 1e-6),
-            'memory_usage': memory_usage
-        }
-        
-        # 算法性能（删除success_rate）
-        if stats['success']:
-            metrics['algorithmic_performance'][method_name] = {
-                'path_length': stats.get('path_length', 0),
-                'optimality_ratio': stats.get('path_length', 0) / max(1, results.get('baseline', {}).get('stats', {}).get('path_length', 1))
-            }
-        else:
-            metrics['algorithmic_performance'][method_name] = {
-                'path_length': float('inf'),
-                'optimality_ratio': float('inf')
-            }
+            # 获取此位置的安全角度
+            safe_angles = position_safety.get((ix, iy), set())
+            
+            # 为每个角度绘制箭头
+            for itheta in range(len(theta_space)):
+                theta = theta_space[itheta]
+                
+                # 计算箭头的起点和终点
+                start_x = x_pos
+                start_y = y_pos
+                end_x = start_x + arrow_length * np.cos(theta)
+                end_y = start_y + arrow_length * np.sin(theta)
+                
+                # 根据安全性选择颜色和粗细
+                if itheta in safe_angles:
+                    color = 'green'
+                    alpha = 0.8
+                    width = arrow_length*0.08
+                else:
+                    color = 'red'
+                    alpha = 0.6
+                    width = arrow_length*0.05
+                
+                # 绘制箭头（增大箭头尺寸）
+                ax.arrow(start_x, start_y, 
+                        end_x - start_x, end_y - start_y,
+                        head_width=arrow_length*0.4, 
+                        head_length=arrow_length*0.3,
+                        fc=color, ec=color, alpha=alpha, width=width)
     
-    return metrics
+    # 绘制起点和终点
+    ax.plot(start_continuous[0], start_continuous[1], 
+            marker='o', color='blue', markersize=20, label='起点', markeredgecolor='white', markeredgewidth=3)
+    ax.plot(goal_continuous[0], goal_continuous[1], 
+            marker='*', color='gold', markersize=25, label='终点', markeredgecolor='black', markeredgewidth=2)
+    
+    # 添加网格线（更细的线）
+    for x in x_space:
+        ax.axvline(x - X_STEP/2, color='lightgray', linewidth=0.5, alpha=0.7)
+        ax.axvline(x + X_STEP/2, color='lightgray', linewidth=0.5, alpha=0.7)
+    for y in y_space:
+        ax.axhline(y - Y_STEP/2, color='lightgray', linewidth=0.5, alpha=0.7)
+        ax.axhline(y + Y_STEP/2, color='lightgray', linewidth=0.5, alpha=0.7)
+    
+    # 创建图例
+    legend_elements = [
+        patches.Patch(color='green', alpha=0.8, label='安全角度（θ维度）'),
+        patches.Patch(color='red', alpha=0.6, label='不安全角度'),
+        patches.Patch(color='black', label='障碍物')
+    ]
+    
+    # 获取起点终点图例
+    handles, labels = ax.get_legend_handles_labels()
+    
+    # 设置图形属性
+    ax.legend(handles=handles + legend_elements, fontsize=14,
+             bbox_to_anchor=(1.02, 1), loc='upper left')
+    ax.set_xlim(X_MIN - 1, X_MAX + 1)
+    ax.set_ylim(Y_MIN - 1, Y_MAX + 1)
+    ax.set_aspect('equal', adjustable='box')
+    ax.set_title('安全角度可视化图 - θ维度展示\n'
+                '绿色箭头：安全方向，红色箭头：不安全方向', 
+                fontsize=18, fontweight='bold')
+    ax.set_xlabel('X坐标', fontsize=14)
+    ax.set_ylabel('Y坐标', fontsize=14)
+    
+    plt.tight_layout()
+    
+    # 保存超高分辨率图片
+    plt.savefig('safe_angle_arrows.png', dpi=300, bbox_inches='tight', facecolor='white')
+    plt.show()
 
-def print_academic_results_table(metrics):
-    """打印学术论文格式的结果表格"""
-    print("\n" + "="*80)
-    print("基于RPIS的A*路径规划算法性能对比")
-    print("="*80)
-    
-    # 表格1：搜索效率对比（仅搜索阶段）
-    print("\n表1: 搜索阶段计算效率对比")
-    print("-" * 80)
-    print(f"{'算法':<18} {'搜索时间':<12} {'节点扩展':<12} {'搜索效率':<15} {'内存占用':<15}")
-    print(f"{'':18} {'(毫秒)':<12} {'(个数)':<12} {'(节点/秒)':<15} {'(存储单位)':<15}")
-    print("-" * 80)
-    
-    for method in ['baseline', 'robust', 'graph_optimized']:
-        if method in metrics['computational_efficiency']:
-            data = metrics['computational_efficiency'][method]
-            method_name = {'baseline': '基线A*', 'robust': '鲁棒A*', 'graph_optimized': '图优化A*'}[method]
-            memory_desc = {'baseline': '开放集节点', 'robust': '安全集状态', 'graph_optimized': '图边连接'}[method]
-            print(f"{method_name:<18} {data['search_time_ms']:<12.2f} {data['nodes_expanded']:<12} {data['nodes_per_second']:<15.0f} {data['memory_usage']:<7}{memory_desc}")
-    
-    # 表格2：路径质量对比
-    print(f"\n表2: 路径质量与安全性对比")
-    print("-" * 80)
-    print(f"{'算法':<18} {'路径长度':<12} {'相对基线':<12} {'安全保障':<15}")
-    print(f"{'':18} {'(步数)':<12} {'(倍数)':<12} {'':15}")
-    print("-" * 80)
-    
-    for method in ['baseline', 'robust', 'graph_optimized']:
-        if method in metrics['algorithmic_performance']:
-            data = metrics['algorithmic_performance'][method]
-            method_name = {'baseline': '基线A*', 'robust': '鲁棒A*', 'graph_optimized': '图优化A*'}[method]
-            safety = {'baseline': '无', 'robust': '是', 'graph_optimized': '是'}[method]
-            path_len = data['path_length'] if data['path_length'] != float('inf') else 'N/A'
-            opt_ratio = f"{data['optimality_ratio']:.2f}" if data['optimality_ratio'] != float('inf') else '1.00'
-            print(f"{method_name:<18} {path_len:<12} {opt_ratio:<12} {safety:<15}")
-    
-    # 性能提升分析
-    if 'robust' in metrics['computational_efficiency'] and 'graph_optimized' in metrics['computational_efficiency']:
-        robust_time = metrics['computational_efficiency']['robust']['search_time_ms']
-        graph_time = metrics['computational_efficiency']['graph_optimized']['search_time_ms']
-        speedup = robust_time / graph_time if graph_time > 0 else float('inf')
-        
-        print(f"\n性能分析总结:")
-        print(f"• 图优化A*相比鲁棒A*搜索提速: {speedup:.1f}倍")
-        print(f"• 安全性保障: 鲁棒A*和图优化A*均提供数学证明的安全性")
-
-def print_three_way_comparison_results(baseline_stats, robust_stats, graph_stats):
-    """打印三种A*方法的详细对比结果"""
-    print("\n" + "="*80)
-    print("三种A*算法性能对比")
-    print("="*80)
-    
-    print(f"{'指标':<20} {'基线A*':<15} {'鲁棒A*':<15} {'图优化A*':<15}")
-    print("-" * 80)
-    
-    # 成功率对比
-    baseline_success = "✓" if baseline_stats['success'] else "✗"
-    robust_success = "✓" if robust_stats['success'] else "✗"
-    graph_success = "✓" if graph_stats['success'] else "✗"
-    print(f"{'成功找到路径':<20} {baseline_success:<15} {robust_success:<15} {graph_success:<15}")
-    
-    # 计算时间对比（搜索阶段）
-    baseline_time = baseline_stats['computation_time']
-    robust_time = robust_stats['computation_time']
-    graph_time = graph_stats['computation_time']
-    print(f"{'搜索时间(秒)':<20} {baseline_time:<15.4f} {robust_time:<15.4f} {graph_time:<15.4f}")
-    
-    # 图构建时间
-    print(f"{'图构建时间(秒)':<20} {'-':<15} {'-':<15} {graph_stats['graph_build_time']:<15.4f}")
-    
-    # 总时间（包含预处理）
-    graph_total = graph_stats['total_time']
-    print(f"{'总时间(秒)':<20} {baseline_time:<15.4f} {robust_time:<15.4f} {graph_total:<15.4f}")
-    
-    # 扩展节点数对比
-    baseline_expanded = baseline_stats['nodes_expanded']
-    robust_expanded = robust_stats['nodes_expanded']
-    graph_expanded = graph_stats['nodes_expanded']
-    print(f"{'扩展节点数':<20} {baseline_expanded:<15} {robust_expanded:<15} {graph_expanded:<15}")
-    
-    # 路径长度对比
-    if baseline_stats['success'] and robust_stats['success'] and graph_stats['success']:
-        baseline_length = baseline_stats['path_length']
-        robust_length = robust_stats['path_length']
-        graph_length = graph_stats['path_length']
-        print(f"{'路径长度':<20} {baseline_length:<15} {robust_length:<15} {graph_length:<15}")
-
-    if graph_time < robust_time:
-        speedup = robust_time / graph_time
-        print(f"• 图优化相比鲁棒A*搜索提速: {speedup:.1f}x")
-    
-    if graph_expanded < robust_expanded:
-        efficiency = robust_expanded / graph_expanded
-        print(f"• 图优化相比鲁棒A*节点扩展效率提升: {efficiency:.1f}x")
-
-# --- 4. 主程序与可视化 ---
+# --- 4. 主程序 ---
 if __name__ == "__main__":    
     # 打印系统信息
     print("鲁棒路径规划系统启动")
@@ -881,19 +726,12 @@ if __name__ == "__main__":
     if not S_infinity:
         print("鲁棒安全集为空，无法进行路径规划。")
         exit()
-    
-    # 2. A*算法对比实验
+      # 2. A*算法对比实验
     comparison_results = compare_astar_methods(start_indices, goal_xy_indices, S_infinity, obstacle_indices)
-      # 选择用于可视化的路径（优先选择鲁棒A*的结果）
-    if comparison_results['robust']['path'] is not None:
-        path_indices = comparison_results['robust']['path']
-    elif comparison_results['graph_optimized']['path'] is not None:
-        path_indices = comparison_results['graph_optimized']['path']
-    elif comparison_results['baseline']['path'] is not None:
-        path_indices = comparison_results['baseline']['path']
-    else:
-        path_indices = None
-        print("未找到路径")
+    
+    # 获取两种路径用于对比可视化
+    baseline_path = comparison_results['baseline']['path']
+    robust_path = comparison_results['robust']['path']
 
     # 3. 计算安全角度统计
     safe_angle_count = {}
@@ -904,20 +742,42 @@ if __name__ == "__main__":
         if key not in safe_angle_count:
             safe_angle_count[key] = 0
         safe_angle_count[key] += 1
-      # 4. 生成路径规划可视化
-    print("生成路径可视化...")
-    create_original_path_visualization(S_infinity, obstacle_indices, path_indices, 
+    
+    # 4. 生成路径规划对比可视化（显示两种算法的路径）
+    print("生成双路径对比可视化...")
+    create_original_path_visualization(S_infinity, obstacle_indices, baseline_path, robust_path,
                                        start_continuous, goal_continuous, safe_angle_count)
     
-    # 5. 打印关键统计指标
+    # 5. 生成安全角度箭头可视化
+    print("生成安全角度箭头可视化...")
+    create_safety_angle_visualization(S_infinity, obstacle_indices, start_continuous, goal_continuous)    
+    # 6. 打印关键统计指标
     print(f"\n系统性能总结:")
     print(f"安全集收敛: {len(S_infinity):,} 个状态")
     print(f"平均鲁棒性: {np.mean(list(safe_angle_count.values())):.2f}/{max_angles} 角度" if safe_angle_count else "N/A")
     print(f"状态空间缩减: {len(S_infinity)/(len(x_space)*len(y_space)*len(theta_space))*100:.1f}% 保留")
     
-    if comparison_results['robust']['stats']['success'] and comparison_results['graph_optimized']['stats']['success']:
+    # 对比两种算法的性能
+    if comparison_results['robust']['stats']['success'] and comparison_results['baseline']['stats']['success']:
         robust_time = comparison_results['robust']['stats']['computation_time']
-        graph_time = comparison_results['graph_optimized']['stats']['computation_time']
-        speedup = robust_time / graph_time if graph_time > 0 else float('inf')
-        print(f"图优化搜索提速: {speedup:.1f}x")    
+        baseline_time = comparison_results['baseline']['stats']['computation_time']
+        if baseline_time > 0:
+            if robust_time < baseline_time:
+                speedup = baseline_time / robust_time
+                print(f"鲁棒A*相比基线A*提速: {speedup:.1f}x")
+            else:
+                slowdown = robust_time / baseline_time
+                print(f"鲁棒A*相比基线A*减速: {slowdown:.1f}x")
+        
+        # 路径质量对比
+        robust_length = comparison_results['robust']['stats']['path_length']
+        baseline_length = comparison_results['baseline']['stats']['path_length']
+        if baseline_length > 0:
+            quality_ratio = robust_length / baseline_length
+            print(f"鲁棒A*路径长度相比基线A*: {quality_ratio:.2f}倍")
+    
+    print("="*60)
+    print("可视化图像已保存:")
+    print("• path_planning_comparison.png - 双算法路径对比图")
+    print("• safe_angle_arrows.png - 安全角度箭头可视化图")
     print("分析完成")

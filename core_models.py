@@ -32,9 +32,11 @@ def indices_to_state(ix, iy, itheta):
 def unicycle_model(state, omega):
     """Unicycle运动学模型"""
     x, y, theta = state
-    x_next = x + V * np.cos(theta) * DT
-    y_next = y + V * np.sin(theta) * DT
     theta_next = theta + omega * DT
+    theta_mid = theta + omega * DT / 2
+    x_next = x + V * np.cos(theta_mid) * DT
+    y_next = y + V * np.sin(theta_mid) * DT
+    
     return np.array([x_next, y_next, theta_next])
 
 def check_path_collision(start_state, end_state, obstacle_indices):
