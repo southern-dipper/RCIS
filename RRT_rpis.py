@@ -5,7 +5,7 @@ from tqdm import tqdm
 import time
 import matplotlib.colors as mcolors
 import random
-from sklearn.neighbors import KDTree
+from typing import List, Tuple, Set, Optional, Dict, Any
 
 # 设置中文字体支持
 plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'DejaVu Sans']  # 支持中文显示
@@ -25,6 +25,7 @@ THETA_MIN, THETA_MAX, THETA_STEP = -np.pi, np.pi, np.pi / 8  # 角度分辨率
 # 动作空间 A = [omega]
 OMEGA_MIN, OMEGA_MAX, OMEGA_STEP = -np.pi / 4, np.pi / 4, np.pi / 8 # 动作空间
 
+# RRT算法参数
 x_space = np.linspace(X_MIN, X_MAX, int((X_MAX - X_MIN) / X_STEP) + 1)
 y_space = np.linspace(Y_MIN, Y_MAX, int((Y_MAX - Y_MIN) / Y_STEP) + 1)
 theta_space = np.linspace(THETA_MIN, THETA_MAX, int((THETA_MAX - THETA_MIN) / THETA_STEP) + 1)[:-1]
@@ -68,8 +69,8 @@ def unicycle_model(state, omega):
     x, y, theta = state
     theta_next = theta + omega * DT
     theta_mid = theta + omega * DT / 2
-    x_next = x + V * np.cos(theta) * DT
-    y_next = y + V * np.sin(theta) * DT
+    x_next = x + V * np.cos(theta) * DT  
+    y_next = y + V * np.sin(theta) * DT  
     
     return np.array([x_next, y_next, theta_next])
 
@@ -88,7 +89,7 @@ def check_path_collision(start_state, end_state, obstacle_indices):
     
     # 使用自适应采样密度：确保采样点间距小于网格对角线长度的一半
     grid_diagonal = np.sqrt(X_STEP**2 + Y_STEP**2)
-    sample_distance = grid_diagonal * 0.4  # 采样间距为网格对角线的40%
+    sample_distance = grid_diagonal * 0.2  # 采样间距
     num_samples = max(int(np.ceil(path_length / sample_distance)), 2)
     
     # 检查路径上的采样点
@@ -107,7 +108,7 @@ def check_path_collision(start_state, end_state, obstacle_indices):
 # --- 2. 鲁棒安全集计算 ---
 
 def compute_robust_safe_set_optimized(obstacle_indices, W):
-    """计算鲁棒安全集并预处理安全动作映射"""
+    """计算鲁棒安全集"""
     print("计算鲁棒安全集...")
     
     # 预计算常用值
@@ -131,7 +132,7 @@ def compute_robust_safe_set_optimized(obstacle_indices, W):
         print(f"迭代 {k}: 当前安全集大小 |S_{k}| = {len(Sk)}")
         if not Sk:
             print("安全集为空，无法继续。")
-            return set(), {}
+            return set()
             
         Sk_plus_1 = set()
         
@@ -167,68 +168,13 @@ def compute_robust_safe_set_optimized(obstacle_indices, W):
                 if is_action_robustly_safe:
                     Sk_plus_1.add(s_indices)
                     break  # 找到一个安全动作就够了
-        
-        # 检查收敛
+          # 检查收敛
         if Sk_plus_1 == Sk:
             print(f"鲁棒安全集已收敛: {len(Sk_plus_1)} 个状态")
-            
-            # 构建完安全集后，预计算所有状态的安全动作
-            print("预计算每个状态的安全动作...")
-            safe_actions_map = compute_safe_actions_for_all_states(Sk_plus_1, obstacle_indices, W_array, omega_list)
-            
-            return Sk_plus_1, safe_actions_map
+            return Sk_plus_1
         
         Sk = Sk_plus_1
         k += 1
-
-def compute_safe_actions_for_all_states(S_infinity, obstacle_indices, W_array, omega_list):
-    """
-    预计算每个状态下的所有安全动作
-    Args:
-        S_infinity: 鲁棒安全集
-        obstacle_indices: 障碍物索引集合
-        W_array: 扰动数组
-        omega_list: 动作列表
-    Returns:
-        dict: 状态索引 -> 安全动作列表的映射
-    """
-    safe_actions_map = {}
-    
-    print(f"预计算 {len(S_infinity)} 个状态的安全动作...")
-    
-    for s_indices in tqdm(S_infinity, desc="预计算安全动作", ncols=100):
-        s_center = np.array([x_space[s_indices[0]], y_space[s_indices[1]], theta_space[s_indices[2]]])
-        safe_actions = []
-        
-        # 对每个动作检查是否鲁棒安全
-        for omega in omega_list:
-            is_action_robustly_safe = True
-            
-            # 对所有扰动检查安全性
-            for w in W_array:
-                s_real = s_center + w
-                s_next_real = unicycle_model(s_real, omega)
-                
-                # 边界检查
-                if not is_state_valid(s_next_real[0], s_next_real[1]):
-                    is_action_robustly_safe = False
-                    break
-                
-                # 路径碰撞检查
-                if check_path_collision(s_real, s_next_real, obstacle_indices):
-                    is_action_robustly_safe = False
-                    break
-                
-                # 安全集检查
-                s_next_indices = discretize_state(*s_next_real)
-                if s_next_indices not in S_infinity:
-                    is_action_robustly_safe = False
-                    break
-            if is_action_robustly_safe:
-                safe_actions.append(omega)
-        
-        safe_actions_map[s_indices] = safe_actions
-    return safe_actions_map
 
 # --- 3. RRT 路径规划算法 ---
 
@@ -236,46 +182,6 @@ def angle_distance(theta1, theta2):
     """计算两个角度之间的最短距离（考虑循环性）"""
     diff = abs(theta1 - theta2)
     return min(diff, 2 * np.pi - diff)
-
-def scaled_distance(state1, state2):
-    """计算两个状态之间的欧氏距离（统一尺度）"""
-    x1, y1, theta1 = state1
-    x2, y2, theta2 = state2
-    
-    # 将角度缩放到与x,y相同的尺度
-    theta_scale = (X_MAX - X_MIN) / (2 * np.pi)
-    
-    dx = x2 - x1
-    dy = y2 - y1
-    dtheta_scaled = angle_distance(theta1, theta2) * theta_scale
-    
-    return np.sqrt(dx*dx + dy*dy + dtheta_scaled*dtheta_scaled)
-
-def build_safe_states_kdtree(S_infinity):
-    """构建安全状态的KD-Tree"""
-    if not S_infinity:
-        return None, []
-    
-    # 将安全状态转换为连续状态并进行尺度统一
-    safe_states_list = []
-    theta_scale = (X_MAX - X_MIN) / (2 * np.pi)
-    
-    for ix, iy, itheta in S_infinity:
-        state = indices_to_state(ix, iy, itheta)
-        x, y, theta = state
-        # 将theta缩放到与x,y相同的尺度
-        theta_scaled = theta * theta_scale
-        safe_states_list.append([x, y, theta, theta_scaled, ix, iy, itheta])  # 存储原始theta和缩放theta
-    
-    if not safe_states_list:
-        return None, []
-    
-    # 构建KD-Tree（使用x, y, theta_scaled）
-    safe_states_array = np.array(safe_states_list)
-    kdtree_data = safe_states_array[:, [0, 1, 3]]  # x, y, theta_scaled
-    kdtree = KDTree(kdtree_data)
-    
-    return kdtree, safe_states_list
 
 class RRTNode:
     """RRT树节点"""
@@ -287,158 +193,100 @@ class RRTNode:
     def add_child(self, child):
         self.children.append(child)
 
-def sample_random_state():
-    """在3D状态空间中随机采样"""
-    x = np.random.uniform(X_MIN, X_MAX)
-    y = np.random.uniform(Y_MIN, Y_MAX)
-    theta = np.random.uniform(THETA_MIN, THETA_MAX)
-    return np.array([x, y, theta])
-
-def find_nearest_node(tree_nodes, sample_state):
-    """在RRT树中找到最近的节点"""
-    min_dist = float('inf')
-    nearest_node = None
-    
-    for node in tree_nodes:
-        dist = scaled_distance(node.state, sample_state)
-        if dist < min_dist:
-            min_dist = dist
-            nearest_node = node
-    
-    return nearest_node
-
-def steer(from_state, to_state, max_step=1.0):
-    """从from_state向to_state方向扩展，最大步长为max_step"""
-    dist = scaled_distance(from_state, to_state)
-    
-    if dist <= max_step:
-        return to_state
-    
-    # 计算方向向量
-    dx = to_state[0] - from_state[0]
-    dy = to_state[1] - from_state[1]
-    
-    # 处理角度差（考虑循环性）
-    dtheta = to_state[2] - from_state[2]
-    if abs(dtheta) > np.pi:
-        if dtheta > 0:
-            dtheta -= 2 * np.pi
-        else:
-            dtheta += 2 * np.pi
-    
-    # 归一化并缩放
-    theta_scale = (X_MAX - X_MIN) / (2 * np.pi)
-    dtheta_scaled = dtheta * theta_scale
-    
-    # 计算实际的缩放因子
-    total_scaled_dist = np.sqrt(dx*dx + dy*dy + dtheta_scaled*dtheta_scaled)
-    scale_factor = max_step / total_scaled_dist
-    
-    # 计算新状态
-    new_x = from_state[0] + dx * scale_factor
-    new_y = from_state[1] + dy * scale_factor
-    new_theta = from_state[2] + (dtheta * scale_factor)
-    
-    # 角度标准化
-    new_theta = (new_theta + np.pi) % (2 * np.pi) - np.pi
-    
-    return np.array([new_x, new_y, new_theta])
-
 def is_goal_reached(state, goal_xy, tolerance=1.0):
     """检查是否到达目标区域（忽略theta）"""
     return (abs(state[0] - goal_xy[0]) <= tolerance and 
             abs(state[1] - goal_xy[1]) <= tolerance)
 
-def rrt_search(start_indices, goal_xy_indices, S_infinity, obstacle_indices, safe_actions_map=None, max_iterations=1000, goal_tolerance=1.0):
+def rrt_search(start_indices: Tuple[int, int, int], goal_xy_indices: Tuple[int, int], 
+               S_infinity: Set[Tuple[int, int, int]], obstacle_indices: Set[Tuple[int, int]], 
+               max_iterations: int = 1000, goal_tolerance: float = 1.0, 
+               goal_bias_prob: float = 0.3) -> Tuple[Optional[List], List, float]:
     """
-    基线RRT搜索算法
+    基线RRT搜索算法 - 2D采样 + 碰撞检查
     Returns:
-        tuple: (path, tree_nodes) 其中path是连续状态列表，tree_nodes是所有树节点
+        tuple: (path, tree_nodes, search_time) 其中path是连续状态列表，tree_nodes是所有树节点，search_time是搜索时间
     """
-    print("运行基线RRT算法...")
+    start_time = time.time()
     
     # 转换为连续状态
     start_state = indices_to_state(*start_indices)
     goal_xy = np.array([x_space[goal_xy_indices[0]], y_space[goal_xy_indices[1]]])
-    
-    # 初始化树
+      # 初始化树
     root = RRTNode(start_state)
     tree_nodes = [root]
     
-    # 构建安全状态KD-Tree（虽然基线RRT不用，但为了统一接口）
-    kdtree, safe_states_list = build_safe_states_kdtree(S_infinity)
-    
     for iteration in range(max_iterations):
-        # 1. 随机采样
-        sample_state = sample_random_state()
+        # 1. 目标偏向采样策略
+        if np.random.random() < goal_bias_prob:
+            # 以一定概率直接朝向目标采样
+            q_rand = np.array([goal_xy[0], goal_xy[1]])
+        else:
+            # 正常随机采样
+            q_rand = np.array([
+                np.random.uniform(X_MIN, X_MAX),
+                np.random.uniform(Y_MIN, Y_MAX)
+            ])
         
-        # 2. 找到最近的树节点
-        nearest_node = find_nearest_node(tree_nodes, sample_state)
+        # 2. 找到最近的树节点（2D距离）
+        min_dist = float('inf')
+        nearest_node = None
+        for node in tree_nodes:
+            dist = np.sqrt((node.state[0] - q_rand[0])**2 + (node.state[1] - q_rand[1])**2)
+            if dist < min_dist:
+                min_dist = dist
+                nearest_node = node
         
-        # 3. 向采样点扩展
-        new_state = steer(nearest_node.state, sample_state, max_step=V*DT)
-          # 4. 检查是否在边界内
+        # 3. 计算朝向采样点的角度
+        dx = q_rand[0] - nearest_node.state[0]
+        dy = q_rand[1] - nearest_node.state[1]
+        if abs(dx) < 1e-6 and abs(dy) < 1e-6:  # 避免除零
+            continue
+        theta_toward_sample = np.arctan2(dy, dx)
+        
+        # 4. 状态扩展
+        max_step = V * DT
+        if min_dist < max_step:
+            q_new = q_rand
+        else:
+            direction = (q_rand - nearest_node.state[:2]) / min_dist
+            q_new = nearest_node.state[:2] + max_step * direction
+        
+        # 组合新的3D状态
+        new_state = np.array([q_new[0], q_new[1], theta_toward_sample])
+        
+        # 5. 检查是否在边界内
         if not is_state_valid(new_state[0], new_state[1]):
             continue
         
-        # 5. 检查路径碰撞（基线RRT需要做碰撞检查）
+        # 6. 检查路径碰撞（基线RRT需要做碰撞检查）
         if check_path_collision(nearest_node.state, new_state, obstacle_indices):
             continue
         
-        # 6. 添加到树中
+        # 7. 添加到树中
         new_node = RRTNode(new_state, nearest_node)
         nearest_node.add_child(new_node)
         tree_nodes.append(new_node)
-        
-        # 7. 检查是否到达目标
+          # 8. 检查是否到达目标
         if is_goal_reached(new_state, goal_xy, goal_tolerance):
-            print(f"基线RRT找到路径！迭代次数: {iteration + 1}")
+            end_time = time.time()
+            search_time = end_time - start_time
+            #print(f"迭代次数: {iteration + 1}, 搜索时间: {search_time:.3f}秒")
             # 回溯路径（连续状态）
             path = []
             current = new_node
             while current is not None:
                 path.append(current.state.copy())  # 直接使用连续状态
                 current = current.parent
-            return path[::-1], tree_nodes  # 返回路径和整个树
+            return path[::-1], tree_nodes, search_time  # 返回路径、树和搜索时间
         
         # 进度显示
         if (iteration + 1) % 100 == 0:
-            print(f"基线RRT迭代进度: {iteration + 1}/{max_iterations}")
-    
-    print("基线RRT未找到路径")
-    return None, tree_nodes
-
-def find_nearest_safe_state(query_state, kdtree, safe_states_list, threshold=1.5):
-    """
-    在安全集中查找最近的安全状态
-    Args:
-        query_state: 查询状态 [x, y, theta]
-        kdtree: 安全状态KD-Tree
-        safe_states_list: 安全状态列表，格式：[x, y, theta, theta_scaled, ix, iy, itheta]
-        threshold: 距离阈值
-    Returns:
-        tuple: (safe_state, distance) 或 (None, float('inf'))
-    """
-    if kdtree is None or not safe_states_list:
-        return None, float('inf')
-    
-    # 将查询状态转换为与KD-Tree一致的格式
-    theta_scale = (X_MAX - X_MIN) / (2 * np.pi)
-    query_scaled = np.array([[query_state[0], query_state[1], query_state[2] * theta_scale]])  # 2D数组
-    
-    # 在KD-Tree中查找最近邻
-    distances, indices = kdtree.query(query_scaled)
-    distance = float(distances[0])  # 提取标量值并转换为Python float
-    idx = int(indices[0].item())    # 安全地提取并转换为int索引
-    
-    # 检查距离是否在阈值内
-    if distance <= threshold:
-        # 返回原始的连续状态
-        safe_state_info = safe_states_list[idx]
-        safe_state = np.array([safe_state_info[0], safe_state_info[1], safe_state_info[2]])  # x, y, 原始theta
-        return safe_state, distance
-    else:
-        return None, distance
+            print(f"基线RRT迭代进度: {iteration + 1}/{max_iterations}")    
+    end_time = time.time()
+    search_time = end_time - start_time
+    print(f"基线RRT未找到路径，搜索时间: {search_time:.3f}秒")
+    return None, tree_nodes, search_time
 
 def is_state_in_safe_set(state, S_infinity):
     """
@@ -456,26 +304,13 @@ def is_state_in_safe_set(state, S_infinity):
     except:
         return False
 
-def safe_rrt_search(start_indices, goal_xy_indices, S_infinity, obstacle_indices, safe_actions_map=None, max_iterations=1000, goal_tolerance=1.0):
+def safe_rrt_search(start_indices, goal_xy_indices, S_infinity, obstacle_indices, max_iterations=3000, goal_tolerance=1.0, goal_bias_prob=0.3):
     """
-    安全RRT搜索算法 - 基于RPIS安全集
-    核心思想：
-    1. 在配置空间自由采样
-    2. 如果扩展后的点不在安全集内，修正到最近的安全状态
-    3. 不进行传统的碰撞检查，完全依赖安全集
-    
-    Args:
-        start_indices: 起点离散索引
-        goal_xy_indices: 目标点xy索引  
-        S_infinity: 鲁棒安全集
-        obstacle_indices: 障碍物索引（安全RRT中不直接使用）
-        safe_actions_map: 预计算的安全动作映射（安全RRT中不直接使用）
-        max_iterations: 最大迭代次数
-        goal_tolerance: 目标容忍度
+    改进的安全RRT搜索算法 - 基于2D+角度调整策略
     Returns:
-        tuple: (path, tree_nodes) 路径（连续状态列表）和树节点，或 (None, tree_nodes)
+        tuple: (path, tree_nodes, search_time) 其中path是连续状态列表，tree_nodes是所有树节点，search_time是搜索时间
     """
-    print("运行安全RRT算法...")
+    start_time = time.time()
     
     # 转换为连续状态
     start_state = indices_to_state(*start_indices)
@@ -489,74 +324,151 @@ def safe_rrt_search(start_indices, goal_xy_indices, S_infinity, obstacle_indices
     # 初始化树
     root = RRTNode(start_state)
     tree_nodes = [root]
-    
-    # 构建安全状态KD-Tree
-    kdtree, safe_states_list = build_safe_states_kdtree(S_infinity)
-    
-    if kdtree is None:
-        print("错误：无法构建安全状态KD-Tree")
-        return None, []
-    
-    # 统计修正情况
+      # 统计修正情况
     correction_stats = {'attempted': 0, 'successful': 0, 'failed': 0}
     
     for iteration in range(max_iterations):
-        # 1. 随机采样
-        sample_state = sample_random_state()
+        # 1. 目标偏向采样策略
+        if np.random.random() < goal_bias_prob:
+            # 以一定概率直接朝向目标采样
+            q_rand = np.array([goal_xy[0], goal_xy[1]])
+        else:
+            # 正常随机采样
+            q_rand = np.array([
+                np.random.uniform(X_MIN, X_MAX),
+                np.random.uniform(Y_MIN, Y_MAX)
+            ])
         
-        # 2. 找到最近的树节点
-        nearest_node = find_nearest_node(tree_nodes, sample_state)
+        # 2. 找到最近的树节点（2D距离）
+        min_dist = float('inf')
+        nearest_node = None
+        for node in tree_nodes:
+            dist = np.sqrt((node.state[0] - q_rand[0])**2 + (node.state[1] - q_rand[1])**2)
+            if dist < min_dist:
+                min_dist = dist
+                nearest_node = node
         
-        # 3. 向采样点扩展
-        new_state = steer(nearest_node.state, sample_state, max_step=V*DT)
+        # 3. 计算期望角度
+        dx = q_rand[0] - nearest_node.state[0]
+        dy = q_rand[1] - nearest_node.state[1]
+        theta_desired = np.arctan2(dy, dx)
         
-        # 4. 检查是否在边界内
-        if not is_state_valid(new_state[0], new_state[1]):
-            continue
+        # 4. 角度安全性检查与调整
+        q_near_pos = nearest_node.state[:2]
+        ix, iy, itheta = discretize_state(q_near_pos[0], q_near_pos[1], theta_desired)
         
-        # 5. 核心安全检查：不在安全集内则尝试修正
-        if not is_state_in_safe_set(new_state, S_infinity):
+        theta_target = None
+        if (ix, iy, itheta) in S_infinity:
+            theta_target = theta_desired
+        else:
+            # WARNING: 硬编码角度搜索，假设5个动作，优先右转
+            for offset in [-1, 1, -2, 2]:
+                candidate_theta_idx = (itheta + offset) % len(theta_space)
+                if (ix, iy, candidate_theta_idx) in S_infinity:
+                    theta_target = theta_space[candidate_theta_idx]
+                    break
+        
+        if theta_target is None:
+            continue  # 没找到安全角度，放弃当前采样
+          # 5. 状态扩展
+        max_step = V * DT
+        if min_dist < max_step:
+            q_new = q_rand
+        else:
+            direction = (q_rand - q_near_pos) / min_dist
+            q_new = q_near_pos + max_step * direction
+        
+        # 验证扩展后状态的安全性
+        new_state = np.array([q_new[0], q_new[1], theta_target])
+        ix_new, iy_new, itheta_new = discretize_state(*new_state)
+        
+                
+        if (ix_new, iy_new, itheta_new) in S_infinity:
+            # 添加到树中
+            # # 添加路径碰撞检查（
+            path_collision = check_path_collision(nearest_node.state, new_state, obstacle_indices)
+            if path_collision:
+                continue
+            new_node = RRTNode(new_state, nearest_node)
+            nearest_node.add_child(new_node)
+            tree_nodes.append(new_node)
+            #     print(f"[调试] 安全RRT检测到路径碰撞！")
+            #     print(f"  起点状态: {nearest_node.state}")
+            #     print(f"  终点状态: {new_state}")
+            #     start_indices = discretize_state(*nearest_node.state)
+            #     end_indices = discretize_state(*new_state)
+            #     print(f"  起点离散化: {start_indices}, 在安全集内: {start_indices in S_infinity}")
+            #     print(f"  终点离散化: {end_indices}, 在安全集内: {end_indices in S_infinity}")
+            #     print(f"  路径长度: {np.sqrt((new_state[0] - nearest_node.state[0])**2 + (new_state[1] - nearest_node.state[1])**2):.3f}")
+
+        else:
+            #直接放弃
+            # continue
+
+            # 局部搜索+放弃策略
             correction_stats['attempted'] += 1
             
-            # 尝试修正到最近的安全状态
-            safe_state, distance = find_nearest_safe_state(
-                new_state, kdtree, safe_states_list, 
-                threshold=1.5 * V * DT  # 修正距离阈值
-            )
+            best_safe_state = None
+            min_distance = float('inf')
             
-            if safe_state is not None:
-                new_state = safe_state
-                correction_stats['successful'] += 1
+            for offset_x in [-1, 0, 1]:
+                for offset_y in [-1, 0, 1]:
+                    for offset_theta in [-1, 0, 1]:
+                        ix_candidate = ix_new + offset_x
+                        iy_candidate = iy_new + offset_y
+                        itheta_candidate = (itheta_new + offset_theta) % len(theta_space)
+                        
+                        if (ix_candidate, iy_candidate, itheta_candidate) in S_infinity:
+                            candidate_state = indices_to_state(ix_candidate, iy_candidate, itheta_candidate)
+                            
+                            # 计算3D欧氏距离（步长权重对齐）
+                            dx = (candidate_state[0] - q_new[0]) / X_STEP
+                            dy = (candidate_state[1] - q_new[1]) / Y_STEP
+                            dtheta = angle_distance(candidate_state[2], theta_target) / THETA_STEP
+                            distance_3d = np.sqrt(dx*dx + dy*dy + dtheta*dtheta)
+                            
+                            if distance_3d < min_distance:
+                                min_distance = distance_3d
+                                best_safe_state = candidate_state
+            
+            if best_safe_state is not None:
+                # 检查距离是否合理
+                distance_2d = np.sqrt((best_safe_state[0] - nearest_node.state[0])**2 + 
+                                    (best_safe_state[1] - nearest_node.state[1])**2)
+                if distance_2d < 1 * max_step:
+                    path_collision = check_path_collision(nearest_node.state, new_state, obstacle_indices)
+                    if path_collision:
+                        continue
+                    new_node = RRTNode(best_safe_state, nearest_node)
+                    nearest_node.add_child(new_node)
+                    tree_nodes.append(new_node)
+                    correction_stats['successful'] += 1
+                else:
+                    correction_stats['failed'] += 1
+                    continue
             else:
-                # 修正失败，放弃当前采样
                 correction_stats['failed'] += 1
                 continue
-        
-        # 6. 添加到树中
-        new_node = RRTNode(new_state, nearest_node)
-        nearest_node.add_child(new_node)
-        tree_nodes.append(new_node)
-        
-        # 7. 检查是否到达目标
-        if is_goal_reached(new_state, goal_xy, goal_tolerance):
-            print(f"安全RRT找到路径！迭代次数: {iteration + 1}")
-            print(f"修正统计 - 尝试: {correction_stats['attempted']}, 成功: {correction_stats['successful']}, 失败: {correction_stats['failed']}")
+          # 检查是否到达目标
+        if is_goal_reached(tree_nodes[-1].state, goal_xy, goal_tolerance):
+            end_time = time.time()
+            search_time = end_time - start_time
+            #print(f"迭代次数: {iteration + 1}, 搜索时间: {search_time:.3f}秒")
             
-            # 回溯路径（连续状态）
+            # 回溯路径
             path = []
-            current = new_node
+            current = tree_nodes[-1]
             while current is not None:
                 path.append(current.state.copy())
                 current = current.parent
-            return path[::-1], tree_nodes
+            return path[::-1], tree_nodes, search_time
         
-        # 进度显示
-        if (iteration + 1) % 100 == 0:
-            print(f"安全RRT迭代进度: {iteration + 1}/{max_iterations}, 修正成功率: {correction_stats['successful']}/{correction_stats['attempted'] if correction_stats['attempted'] > 0 else 1:.2f}")
-    
-    print("安全RRT未找到路径")
+        
+    end_time = time.time()
+    search_time = end_time - start_time
+    print(f"改进安全RRT未找到路径，搜索时间: {search_time:.3f}秒")
     print(f"最终修正统计 - 尝试: {correction_stats['attempted']}, 成功: {correction_stats['successful']}, 失败: {correction_stats['failed']}")
-    return None, tree_nodes
+    return None, tree_nodes, search_time
 
 def count_tree_branches(tree_nodes):
     """
@@ -671,11 +583,10 @@ def create_rrt_path_visualization(S_infinity, obstacle_indices, rrt_result, safe
         
           # 1. 先绘制整个树结构（所有分叉）
         for node in rrt_tree:
-            if node.parent is not None:
-                # 绘制从父节点到当前节点的连线
+            if node.parent is not None:                # 绘制从父节点到当前节点的连线
                 ax.plot([node.parent.state[0], node.state[0]], 
                        [node.parent.state[1], node.state[1]], 
-                       color='#333333', linewidth=1.2, alpha=0.7)  # 深灰色线条
+                       color='#FFB3B3', linewidth=1.2, alpha=0.8)  # 淡红色线条
         
         # 2. 绘制最终路径（连续状态）
         rrt_xy = np.array([[state[0], state[1]] for state in rrt_path])
@@ -710,10 +621,9 @@ def create_rrt_path_visualization(S_infinity, obstacle_indices, rrt_result, safe
         
           # 1. 先绘制整个树结构（所有分叉）
         for node in safe_rrt_tree:
-            if node.parent is not None:
-                ax.plot([node.parent.state[0], node.state[0]], 
+            if node.parent is not None:                ax.plot([node.parent.state[0], node.state[0]], 
                        [node.parent.state[1], node.state[1]], 
-                       color='#555555', linewidth=1.2, alpha=0.6)  # 深灰色线条
+                       color='#B3D9FF', linewidth=1.2, alpha=0.8)  # 淡蓝色线条
         
         # 2. 绘制最终路径
         safe_rrt_xy = np.array([[state[0], state[1]] for state in safe_rrt_path])
@@ -762,9 +672,8 @@ def create_rrt_path_visualization(S_infinity, obstacle_indices, rrt_result, safe
     ax.set_yticks(y_space[::2])
       # 创建图例元素
     legend_patches = [
-        patches.Patch(color='#000000', label='障碍物'),
-        plt.Line2D([0], [0], color='#333333', linewidth=1.2, alpha=0.7, label='基线RRT树分叉'),
-        plt.Line2D([0], [0], color='#555555', linewidth=1.2, alpha=0.6, label='安全RRT树分叉'),
+        patches.Patch(color='#000000', label='障碍物'),        plt.Line2D([0], [0], color='#FFB3B3', linewidth=1.2, alpha=0.8, label='基线RRT树分叉'),
+        plt.Line2D([0], [0], color='#B3D9FF', linewidth=1.2, alpha=0.8, label='安全RRT树分叉'),
         patches.Patch(color='gold', alpha=0.3, label='目标区域 (3D柱状)')
     ]
     
@@ -780,117 +689,14 @@ def create_rrt_path_visualization(S_infinity, obstacle_indices, rrt_result, safe
     plt.tight_layout()
     
     # 保存高分辨率图片
-    plt.savefig('rrt_path_planning_comparison.png', dpi=300, bbox_inches='tight', facecolor='white')
-    plt.show()
-
-def create_safety_angle_visualization(S_infinity, obstacle_indices, start_continuous, goal_continuous):
-    """创建安全角度箭头可视化图 - 展示θ维度信息"""
-    
-    # 创建超大图形以便看清箭头
-    fig, ax = plt.subplots(figsize=(20, 16), dpi=150)
-    
-    # 计算每个位置的安全角度
-    position_safety = {}
-    for ix, iy, itheta in S_infinity:
-        key = (ix, iy)
-        if key not in position_safety:
-            position_safety[key] = set()
-        position_safety[key].add(itheta)
-    
-    # 设置箭头长度（稍微大一些以便看清）
-    arrow_length = min(X_STEP, Y_STEP) * 0.35
-    
-    # 为每个格点绘制箭头
-    for ix in range(len(x_space)):
-        for iy in range(len(y_space)):
-            x_pos = x_space[ix]
-            y_pos = y_space[iy]
-            
-            # 检查是否是障碍物
-            if (ix, iy) in obstacle_indices:
-                # 绘制障碍物格子
-                rect = patches.Rectangle(
-                    (x_pos - X_STEP/2, y_pos - Y_STEP/2), 
-                    X_STEP, Y_STEP, 
-                    facecolor='black', alpha=0.8, edgecolor='gray'
-                )
-                ax.add_patch(rect)
-                continue
-            
-            # 获取此位置的安全角度
-            safe_angles = position_safety.get((ix, iy), set())
-            
-            # 为每个角度绘制箭头
-            for itheta in range(len(theta_space)):
-                theta = theta_space[itheta]
-                
-                # 计算箭头的起点和终点
-                start_x = x_pos
-                start_y = y_pos
-                end_x = start_x + arrow_length * np.cos(theta)
-                end_y = start_y + arrow_length * np.sin(theta)
-                
-                # 根据安全性选择颜色和粗细
-                if itheta in safe_angles:
-                    color = 'green'
-                    alpha = 0.8
-                    width = arrow_length*0.08
-                else:
-                    color = 'red'
-                    alpha = 0.6
-                    width = arrow_length*0.05
-                
-                # 绘制箭头（增大箭头尺寸）
-                ax.arrow(start_x, start_y, 
-                        end_x - start_x, end_y - start_y,
-                        head_width=arrow_length*0.4, 
-                        head_length=arrow_length*0.3,
-                        fc=color, ec=color, alpha=alpha, width=width)
-    
-    # 绘制起点和终点
-    ax.plot(start_continuous[0], start_continuous[1], 
-            marker='o', color='blue', markersize=20, label='起点', markeredgecolor='white', markeredgewidth=3)
-    ax.plot(goal_continuous[0], goal_continuous[1], 
-            marker='*', color='gold', markersize=25, label='终点', markeredgecolor='black', markeredgewidth=2)
-    
-    # 添加网格线（更细的线）
-    for x in x_space:
-        ax.axvline(x - X_STEP/2, color='lightgray', linewidth=0.5, alpha=0.7)
-        ax.axvline(x + X_STEP/2, color='lightgray', linewidth=0.5, alpha=0.7)
-    for y in y_space:
-        ax.axhline(y - Y_STEP/2, color='lightgray', linewidth=0.5, alpha=0.7)
-        ax.axhline(y + Y_STEP/2, color='lightgray', linewidth=0.5, alpha=0.7)
-    
-    # 创建图例
-    legend_elements = [
-        patches.Patch(color='green', alpha=0.8, label='安全角度（θ维度）'),
-        patches.Patch(color='red', alpha=0.6, label='不安全角度'),
-        patches.Patch(color='black', label='障碍物')
-    ]
-    
-    # 获取起点终点图例
-    handles, labels = ax.get_legend_handles_labels()
-    
-    # 设置图形属性
-    ax.legend(handles=handles + legend_elements, fontsize=14, markerscale=0.8,
-             bbox_to_anchor=(1.02, 1), loc='upper left')
-    ax.set_xlim(X_MIN - 1, X_MAX + 1)
-    ax.set_ylim(Y_MIN - 1, Y_MAX + 1)
-    ax.set_aspect('equal', adjustable='box')
-    ax.set_title('安全角度可视化图 - θ维度展示\n'
-                '绿色箭头：安全方向，红色箭头：不安全方向', 
-                fontsize=18, fontweight='bold')
-    ax.set_xlabel('X坐标', fontsize=14)
-    ax.set_ylabel('Y坐标', fontsize=14)
-    
-    plt.tight_layout()
-    
-    # 保存超高分辨率图片
-    plt.savefig('rrt_safe_angle_arrows.png', dpi=300, bbox_inches='tight', facecolor='white')
+    #plt.savefig('rrt_path_planning_comparison.png', dpi=300, bbox_inches='tight', facecolor='white')
     plt.show()
 
 # --- 5. 主程序 ---
 if __name__ == "__main__":    
+    # RRT算法参数
+    GOAL_BIAS_PROBABILITY = 0.2  # 目标偏向采样概率
+    
     # 定义问题
     start_continuous = np.array([0., 0., np.pi / 4])  
     goal_continuous = np.array([10., 10.])
@@ -902,28 +708,44 @@ if __name__ == "__main__":
     obstacle_indices = set()
     
     # 添加一些简单的障碍物
-    for i in range(4, 16):
-        obstacle_indices.add((i, 18))  # 水平障碍
-    for i in range(6, 16):
-        obstacle_indices.add((i, 7)) 
-    for j in range(8, 19):
-        obstacle_indices.add((18, j))  # 垂直障碍
+    for i in range(8, 22):
+        obstacle_indices.add((i, 15))  # 水平障碍
+    for i in range(8, 18):
+        obstacle_indices.add((i, 11)) 
+    for i in range(11, 19):
+        obstacle_indices.add((i, 7))
+    for i in range(11, 22):
+        obstacle_indices.add((i, 3))  
     
-    obstacle_indices.add((4, 16))
-    obstacle_indices.add((3, 17))
-    obstacle_indices.add((5, 17))    # 1. 计算鲁棒安全集
-    S_infinity, safe_actions_map = compute_robust_safe_set_optimized(obstacle_indices, W)
+    for j in range(12, 15):
+        obstacle_indices.add((7, j))  # 垂直障碍
+    for j in range(4, 15):
+        obstacle_indices.add((22, j))  # 垂直障碍    
+    for j in range(4, 7):
+        obstacle_indices.add((11, j))  # 垂直障碍 
+    
+    S_infinity = compute_robust_safe_set_optimized(obstacle_indices, W)
 
     if not S_infinity:
         print("鲁棒安全集为空，无法进行路径规划")
-        exit()
-    
-    # 2. RRT算法实验
-    print("开始基线RRT路径规划...")
-    rrt_result = rrt_search(start_indices, goal_xy_indices, S_infinity, obstacle_indices, safe_actions_map)
+        exit()    # 2. RRT算法实验    print("开始基线RRT路径规划...")
+    rrt_result = rrt_search(start_indices, goal_xy_indices, S_infinity, obstacle_indices, goal_bias_prob=GOAL_BIAS_PROBABILITY)
+    rrt_path, rrt_tree, rrt_time = rrt_result if rrt_result[0] is not None else (None, rrt_result[1], rrt_result[2])
     
     print("开始安全RRT路径规划...")
-    safe_rrt_result = safe_rrt_search(start_indices, goal_xy_indices, S_infinity, obstacle_indices, safe_actions_map)
+    safe_rrt_result = safe_rrt_search(start_indices, goal_xy_indices, S_infinity, obstacle_indices, goal_bias_prob=GOAL_BIAS_PROBABILITY)
+    safe_rrt_path, safe_rrt_tree, safe_rrt_time = safe_rrt_result if safe_rrt_result[0] is not None else (None, safe_rrt_result[1], safe_rrt_result[2])
+    
+    # 输出时间对比
+    print(f"\n=== 搜索时间对比 ===")
+    print(f"基线RRT搜索时间: {rrt_time:.3f}秒")
+    print(f"安全RRT搜索时间: {safe_rrt_time:.3f}秒")
+    if rrt_time > 0:
+        print(f"安全RRT相对基线RRT的时间比: {safe_rrt_time/rrt_time:.2f}x")
+    
+    # 重新包装结果以保持兼容性
+    rrt_result = (rrt_path, rrt_tree)
+    safe_rrt_result = (safe_rrt_path, safe_rrt_tree)
 
     # 3. 计算安全角度统计
     safe_angle_count = {}
@@ -939,4 +761,83 @@ if __name__ == "__main__":
     create_rrt_path_visualization(S_infinity, obstacle_indices, rrt_result, safe_rrt_result,
                                   start_continuous, goal_continuous, safe_angle_count)
     
-    #create_safety_angle_visualization(S_infinity, obstacle_indices, start_continuous, goal_continuous)
+
+"""
+基线RRT：保持原有的2D路径规划逻辑
+
+改进的安全RRT：
+1. 在2D空间采样 q_rand(x, y)
+2. 寻找最近树节点 q_near，记录距离 d
+3. 计算 q_near 指向 q_rand 的角度 θ_desired
+
+4. 角度安全性检查与调整：
+   离散化 (q_near.x, q_near.y, θ_desired) 为 (ix, iy, iθ)
+     θ_target = None
+   if (ix, iy, iθ) 在安全集内:
+       θ_target = θ_desired  # 期望角度本身就安全
+   else:
+       # 在同一位置(ix, iy)寻找与θ_desired最接近的安全角度
+       # WARNING: 这里硬编码了[-1,1,-2,2]，默认动作空间是5个动作，采用优先右转策略
+       使用固定搜索序列找到与θ_desired最近的安全角度:
+           for offset in [-1, 1, -2, 2]:  # 优先右转策略
+               candidate_theta_idx = (iθ + offset) % len(theta_space)  # 处理角度循环
+               if (ix, iy, candidate_theta_idx) 在安全集内:
+                   θ_target = theta_space[candidate_theta_idx]
+                   break
+       
+       if 没找到安全角度:
+           放弃当前采样，continue
+
+5. 状态扩展：
+   if θ_target is not None:
+       if d < 最大允许步长:
+           q_new = q_rand  # 直接扩展到采样点
+       else:
+           # 在2D空间中按比例缩放到最大步长
+           direction = (q_rand - q_near) / d  # 单位方向向量
+           q_new = q_near + 最大允许步长 * direction
+       
+       # 验证扩展后状态的安全性
+       离散化 (q_new.x, q_new.y, θ_target) 为 (ix_new, iy_new, iθ_target)
+       
+       if (ix_new, iy_new, iθ_target) 在安全集内:
+           # 直接添加到树中（依赖安全集保证安全性，不做路径碰撞检查）
+           将 (q_new.x, q_new.y, θ_target) 添加到树中
+       else:
+           # 方案2：局部搜索+放弃策略
+           # 在q_new附近3x3x3邻域内搜索安全状态，使用3D欧氏距离
+           best_safe_state = None
+           min_distance = float('inf')
+           
+           for offset_x in [-1, 0, 1]:
+               for offset_y in [-1, 0, 1]:
+                   for offset_theta in [-1, 0, 1]:
+                       ix_candidate = ix_new + offset_x
+                       iy_candidate = iy_new + offset_y
+                       iθ_candidate = (iθ_target + offset_theta) % len(theta_space)
+                       
+                       if (ix_candidate, iy_candidate, iθ_candidate) 在安全集内:
+                           candidate_state = indices_to_state(ix_candidate, iy_candidate, iθ_candidate)
+                           
+                           # 计算3D欧氏距离（角度维度权重与位置维度对齐）
+                           # 使用统一的步长权重：X_STEP, Y_STEP, THETA_STEP
+                           dx = (candidate_state[0] - q_new[0]) / X_STEP
+                           dy = (candidate_state[1] - q_new[1]) / Y_STEP  
+                           dtheta = angle_distance(candidate_state[2], θ_target) / THETA_STEP
+                           distance_3d = np.sqrt(dx*dx + dy*dy + dtheta*dtheta)
+                           
+                           if distance_3d < min_distance:
+                               min_distance = distance_3d
+                               best_safe_state = candidate_state
+           
+           if best_safe_state is not None:
+               # 检查是否在合理距离内（使用2D距离检查与q_near的关系）
+               distance_2d = np.sqrt((best_safe_state[0] - q_near[0])**2 + (best_safe_state[1] - q_near[1])**2)
+               if distance_2d < 1.5 * 最大允许步长:
+                   # 直接添加到树中（依赖安全集保证安全性）
+                   将 best_safe_state 添加到树中
+               else:
+                   放弃当前采样  # 距离太远
+           else:
+               放弃当前采样  # 没找到合适的安全状态
+"""
