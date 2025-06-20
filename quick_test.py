@@ -14,7 +14,7 @@ def quick_performance_test(num_runs=3, max_iterations=500):
     print("=" * 60)
     print("基于RPIS的安全RRT vs 基线RRT - 性能对比测试")
     print("=" * 60)
-    
+    bias=0.1
     # 测试参数
     start_continuous = np.array([0., 0., np.pi / 4])  
     goal_continuous = np.array([10., 10.])
@@ -68,7 +68,7 @@ def quick_performance_test(num_runs=3, max_iterations=500):
         # 测试基线RRT
         baseline_path, baseline_tree, baseline_time = rrt_search(
             start_indices, goal_xy_indices, S_infinity, obstacle_indices, 
-            max_iterations=max_iterations, goal_tolerance=1.0
+            max_iterations=max_iterations, goal_tolerance=1.0,goal_bias_prob=bias
         )
         
         baseline_success = baseline_path is not None
@@ -86,7 +86,7 @@ def quick_performance_test(num_runs=3, max_iterations=500):
           # 测试安全RRT
         safe_path, safe_tree, safe_time = safe_rrt_search(
             start_indices, goal_xy_indices, S_infinity, obstacle_indices,
-            max_iterations=max_iterations, goal_tolerance=1.0
+            max_iterations=max_iterations, goal_tolerance=1.0, goal_bias_prob=bias
         )
         
         safe_success = safe_path is not None

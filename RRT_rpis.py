@@ -194,14 +194,27 @@ class RRTNode:
         self.children.append(child)
 
 def is_goal_reached(state, goal_xy, tolerance=1.0):
-    """检查是否到达目标区域（忽略theta）"""
-    return (abs(state[0] - goal_xy[0]) <= tolerance and 
-            abs(state[1] - goal_xy[1]) <= tolerance)
+    """检查是否到达目标区域（圆形区域，半径=tolerance）
+    
+    Args:
+        state: 当前状态 [x, y, theta]
+        goal_xy: 目标中心点 [x, y]
+        tolerance: 目标区域半径（默认1.0，形成半径为1.0的圆形区域）
+    
+    Returns:
+        bool: 是否到达目标区域
+    
+    注意：使用欧几里得距离，形成以goal_xy为中心的圆形区域
+    """
+    dx = state[0] - goal_xy[0]
+    dy = state[1] - goal_xy[1]
+    distance = np.sqrt(dx*dx + dy*dy)
+    return distance <= tolerance
 
 def rrt_search(start_indices: Tuple[int, int, int], goal_xy_indices: Tuple[int, int], 
                S_infinity: Set[Tuple[int, int, int]], obstacle_indices: Set[Tuple[int, int]], 
                max_iterations: int = 1000, goal_tolerance: float = 1.0, 
-               goal_bias_prob: float = 0.3) -> Tuple[Optional[List], List, float]:
+               goal_bias_prob: float = 0.1) -> Tuple[Optional[List], List, float]:
     """
     基线RRT搜索算法 - 2D采样 + 碰撞检查
     Returns:
@@ -304,7 +317,7 @@ def is_state_in_safe_set(state, S_infinity):
     except:
         return False
 
-def safe_rrt_search(start_indices, goal_xy_indices, S_infinity, obstacle_indices, max_iterations=3000, goal_tolerance=1.0, goal_bias_prob=0.3):
+def safe_rrt_search(start_indices, goal_xy_indices, S_infinity, obstacle_indices, max_iterations=3000, goal_tolerance=1.0, goal_bias_prob=0.1):
     """
     改进的安全RRT搜索算法 - 基于2D+角度调整策略
     Returns:
@@ -646,12 +659,11 @@ def create_rrt_path_visualization(S_infinity, obstacle_indices, rrt_result, safe
                 ax.arrow(state[0], state[1],
                          0.4 * np.cos(state[2]), 0.4 * np.sin(state[2]), 
                          head_width=0.2, head_length=0.2, fc="#070FFF", ec="#071CFF", 
-                         alpha=0.8, zorder=7)
-        # 如果节点数大于10，则不画箭头
+                         alpha=0.8, zorder=7)        # 如果节点数大于10，则不画箭头
     
     ax.plot(start_continuous[0], start_continuous[1], marker='o', color='green', markersize=12, label='起点')
     
-    # 绘制目标区域（圆形区域，因为是3D柱状区域在2D的投影）
+    # 绘制目标区域（圆形区域，半径1.0，与目标检测逻辑一致）
     goal_x, goal_y = goal_continuous[0], goal_continuous[1]
     goal_circle = patches.Circle((goal_x, goal_y), radius=1.0, 
                                 facecolor='gold', alpha=0.3, edgecolor='goldenrod', linewidth=2)
@@ -674,7 +686,7 @@ def create_rrt_path_visualization(S_infinity, obstacle_indices, rrt_result, safe
     legend_patches = [
         patches.Patch(color='#000000', label='障碍物'),        plt.Line2D([0], [0], color='#FFB3B3', linewidth=1.2, alpha=0.8, label='基线RRT树分叉'),
         plt.Line2D([0], [0], color='#B3D9FF', linewidth=1.2, alpha=0.8, label='安全RRT树分叉'),
-        patches.Patch(color='gold', alpha=0.3, label='目标区域 (3D柱状)')
+        patches.Patch(color='gold', alpha=0.3, label='目标区域 (圆形r=1.0)')
     ]
     
     # 获取线条图例
