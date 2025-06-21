@@ -205,11 +205,11 @@ def parameter_sensitivity_test(S_infinity=None):
           # 进行n轮测试
         success_count = 0
         total_time = 0
-        n=10
+        n=500
         for run in range(n):
             safe_path, safe_tree, safe_time = safe_rrt_search(
                 start_indices, goal_xy_indices, S_infinity, obstacle_indices,
-                max_iterations=500, goal_tolerance=1.0, goal_bias_prob=goal_bias
+                max_iterations=3000, goal_tolerance=1.0, goal_bias_prob=goal_bias
             )
             
             if safe_path is not None:
@@ -224,7 +224,7 @@ def parameter_sensitivity_test(S_infinity=None):
 
 if __name__ == "__main__":
     # 快速性能测试
-    baseline_results, safe_results, S_infinity = quick_performance_test(num_runs=500, max_iterations=1000)
+    baseline_results, safe_results, S_infinity = quick_performance_test(num_runs=1000, max_iterations=4000)
     
     # 参数敏感性测试（复用安全集）
     parameter_sensitivity_test(S_infinity)
