@@ -14,16 +14,16 @@ plt.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
 # --- 1. 环境与模型定义 ---
 
 # Unicycle模型参数  
-V = 1.0 
+V = 0.99 
 DT = 1.0
 
 # 状态空间 S = [x, y, theta] - 优化后的网格（平衡精度与计算效率）
 X_MIN, X_MAX, X_STEP = -1, 11, 0.5  
 Y_MIN, Y_MAX, Y_STEP = -1, 11, 0.5    
-THETA_MIN, THETA_MAX, THETA_STEP = -np.pi, np.pi, np.pi / 8  # 角度分辨率
+THETA_MIN, THETA_MAX, THETA_STEP = -np.pi, np.pi, np.pi / 4  # 角度分辨率
 
 # 动作空间 A = [omega]
-OMEGA_MIN, OMEGA_MAX, OMEGA_STEP = -np.pi / 4, np.pi / 4, np.pi / 8 # 动作空间
+OMEGA_MIN, OMEGA_MAX, OMEGA_STEP = -np.pi / 4, np.pi / 4, np.pi / 4 # 动作空间
 
 # RRT算法参数
 x_space = np.linspace(X_MIN, X_MAX, int((X_MAX - X_MIN) / X_STEP) + 1)
@@ -33,7 +33,7 @@ omega_space = np.linspace(OMEGA_MIN, OMEGA_MAX, int((OMEGA_MAX - OMEGA_MIN) / OM
 
 # *** 定义扰动空间 W - 优化版本 ***
 # 定义扰动集：只测试四个角点
-epsilon = 1e-3  
+epsilon = -1e-1  
 wx_space = np.array([-X_STEP/2+1e-3, X_STEP/2-1e-3])
 wy_space = np.array([-Y_STEP/2+1e-3, Y_STEP/2-1e-3])
 wtheta_space = np.array([0.0])  # 暂不考虑角度扰动
@@ -399,7 +399,7 @@ def safe_rrt_search(start_indices, goal_xy_indices, S_infinity, obstacle_indices
                 
         if (ix_new, iy_new, itheta_new) in S_infinity:
             # 添加到树中
-            # # 添加路径碰撞检查（
+            # 添加路径碰撞检查（
             path_collision = check_path_collision(nearest_node.state, new_state, obstacle_indices)
             if path_collision:
                 continue
@@ -696,7 +696,106 @@ def create_rrt_path_visualization(S_infinity, obstacle_indices, rrt_result, safe
     # 保存高分辨率图片
     plt.savefig('rrt_path_planning_comparison.png', dpi=300, bbox_inches='tight', facecolor='white')
     plt.show()
-
+def rrt_create_safety_angle_visualization(S_infinity, obstacle_indices, start_continuous, goal_continuous):
+    """创建安全角度箭头可视化图 - 展示θ维度信息"""
+    
+    # 创建超大图形以便看清箭头
+    fig, ax = plt.subplots(figsize=(20, 16), dpi=150)
+    
+    # 计算每个位置的安全角度
+    position_safety = {}
+    for ix, iy, itheta in S_infinity:
+        key = (ix, iy)
+        if key not in position_safety:
+            position_safety[key] = set()
+        position_safety[key].add(itheta)
+    
+    # 设置箭头长度（稍微大一些以便看清）
+    arrow_length = min(X_STEP, Y_STEP) * 0.35
+    
+    # 为每个格点绘制箭头
+    for ix in range(len(x_space)):
+        for iy in range(len(y_space)):
+            x_pos = x_space[ix]
+            y_pos = y_space[iy]
+            
+            # 检查是否是障碍物
+            if (ix, iy) in obstacle_indices:
+                # 绘制障碍物格子
+                rect = patches.Rectangle(
+                    (x_pos - X_STEP/2, y_pos - Y_STEP/2), 
+                    X_STEP, Y_STEP, 
+                    facecolor='black', alpha=0.8, edgecolor='gray'
+                )
+                ax.add_patch(rect)
+                continue
+            
+            # 获取此位置的安全角度
+            safe_angles = position_safety.get((ix, iy), set())
+            
+            # 为每个角度绘制箭头
+            for itheta in range(len(theta_space)):
+                theta = theta_space[itheta]
+                
+                # 计算箭头的起点和终点
+                start_x = x_pos
+                start_y = y_pos
+                end_x = start_x + arrow_length * np.cos(theta)
+                end_y = start_y + arrow_length * np.sin(theta)
+                
+                # 根据安全性选择颜色和粗细
+                if itheta in safe_angles:
+                    color = 'green'
+                    alpha = 0.8
+                    width = arrow_length*0.08
+                else:
+                    color = 'red'
+                    alpha = 0.6
+                    width = arrow_length*0.05
+                
+                # 绘制箭头（增大箭头尺寸）
+                ax.arrow(start_x, start_y, 
+                        end_x - start_x, end_y - start_y,
+                        head_width=arrow_length*0.4, 
+                        head_length=arrow_length*0.3,
+                        fc=color, ec=color, alpha=alpha, width=width)    # 绘制起点和终点
+    ax.plot(start_continuous[0], start_continuous[1], 
+            marker='o', color='blue', markersize=20, label='起点', markeredgecolor='white', markeredgewidth=3)
+    ax.plot(goal_continuous[0], goal_continuous[1], 
+            marker='*', color='gold', markersize=25, label='终点', markeredgecolor='black', markeredgewidth=2)
+    
+    # 添加网格线（更细的线）
+    for x in x_space:
+        ax.axvline(x - X_STEP/2, color='lightgray', linewidth=0.5, alpha=0.7)
+        ax.axvline(x + X_STEP/2, color='lightgray', linewidth=0.5, alpha=0.7)
+    for y in y_space:
+        ax.axhline(y - Y_STEP/2, color='lightgray', linewidth=0.5, alpha=0.7)
+        ax.axhline(y + Y_STEP/2, color='lightgray', linewidth=0.5, alpha=0.7)    # 创建图例
+    legend_elements = [
+        patches.Patch(color='green', alpha=0.8, label='安全角度（θ维度）'),
+        patches.Patch(color='red', alpha=0.6, label='不安全角度'),
+        patches.Patch(color='black', label='障碍物')
+    ]
+    
+    # 获取起点终点图例
+    handles, labels = ax.get_legend_handles_labels()
+      # 设置图形属性
+    ax.legend(handles=handles + legend_elements, fontsize=14, markerscale=0.8,
+             bbox_to_anchor=(1.02, 1), loc='upper left')
+    ax.set_xlim(X_MIN - 1, X_MAX + 1)
+    ax.set_ylim(Y_MIN - 1, Y_MAX + 1)
+    ax.set_aspect('equal', adjustable='box')
+    ax.set_title('安全角度可视化图 - θ维度展示\n'
+                '绿色箭头：安全方向，红色箭头：不安全方向', 
+                fontsize=18, fontweight='bold')
+    ax.set_xlabel('X坐标', fontsize=14)
+    ax.set_ylabel('Y坐标', fontsize=14)
+    
+    plt.tight_layout()
+    
+    # 保存超高分辨率图片
+    plt.savefig('rrt_safe_angle_arrows.png', dpi=300, bbox_inches='tight', facecolor='white')
+    plt.show()
 # --- 5. 主程序 ---
 if __name__ == "__main__":    
     # RRT算法参数
@@ -764,7 +863,8 @@ if __name__ == "__main__":
     
     # 4. 生成可视化
     create_rrt_path_visualization(S_infinity, obstacle_indices, rrt_result, safe_rrt_result,
-                                  start_continuous, goal_continuous, safe_angle_count)    
+                                  start_continuous, goal_continuous, safe_angle_count) 
+    rrt_create_safety_angle_visualization(S_infinity, obstacle_indices, start_continuous, goal_continuous)   
 
 """
 算法1: 鲁棒安全集计算
