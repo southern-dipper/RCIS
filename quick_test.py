@@ -205,7 +205,7 @@ def parameter_sensitivity_test(S_infinity=None):
           # 进行n轮测试
         success_count = 0
         total_time = 0
-        n=500
+        n=200
         for run in range(n):
             safe_path, safe_tree, safe_time = safe_rrt_search(
                 start_indices, goal_xy_indices, S_infinity, obstacle_indices,

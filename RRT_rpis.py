@@ -67,9 +67,9 @@ def indices_to_state(ix, iy, itheta):
 def unicycle_model(state, omega):
     """Unicycle运动学模型 - 使用中点积分方法提高精度"""
     x, y, theta = state
-    theta_next = theta + omega * DT
-    theta_mid = theta + omega * DT / 2
-    x_next = x + V * np.cos(theta) * DT  
+    theta_next = theta + omega * DT     #后向欧拉法  (Backward Euler)
+    theta_mid = theta + omega * DT / 2  #二阶龙格-库塔法 (RK2)
+    x_next = x + V * np.cos(theta) * DT #前向欧拉法 (Forward Euler) 
     y_next = y + V * np.sin(theta) * DT  
     
     return np.array([x_next, y_next, theta_next])
