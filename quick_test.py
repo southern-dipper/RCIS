@@ -22,7 +22,7 @@ def generate_random_start_goal(obstacle_indices, min_distance=1.5, S_infinity=No
     
     Returns:
         start_continuous: 起点连续坐标 [x, y, theta]
-        goal_continuous: 终点连续坐标 [x, y]
+        goal_continuous: ？？？
     """
     max_attempts = 1000
     
@@ -57,6 +57,7 @@ def generate_random_start_goal(obstacle_indices, min_distance=1.5, S_infinity=No
         # 检查距离是否足够远
         distance = np.linalg.norm(np.array([start_x, start_y]) - np.array([goal_x, goal_y]))
         if distance >= min_distance:
+            #FIXME:这里暂时返回随机起点和固定终点
             return start_continuous,np.array([5, 6.5])
     
     # 如果无法生成合适的起点和终点，使用默认值
@@ -223,7 +224,7 @@ def quick_performance_test(num_runs=3, max_iterations=3000):
 
 def parameter_sensitivity_test(S_infinity=None):  
     """
-    参数敏感性测试
+    参数敏感性测试，可能有bug
     """
     print("=" * 60)
     print("参数敏感性测试")
