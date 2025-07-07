@@ -78,16 +78,8 @@ Desktop.ini
 # 技术报告
 技术报告*.md
 
-# 图像输出文件（保留重要的结果图像）
-*_output.png
-*_result.png
-*_temp.png
-# 但保留示例图像
-!path_planning_comparison.png
-!rrt_path_planning_comparison.png
-!safe_angle_arrows.png
-!rrt_safe_angle_arrows.png
-!rrt结果.png
+# 图像输出文件
+*.png
 
 # LaTeX 生成文件
 *.aux

@@ -75,7 +75,10 @@ def unicycle_model(state, omega):
     return np.array([x_next, y_next, theta_next])
 
 def check_path_collision(start_state, end_state, obstacle_indices):
-    """检查从起点到终点的路径是否与障碍物碰撞"""
+    """检查从起点到终点的路径是否与障碍物碰撞
+       FIXME:基于采样的安全检查，小间距内的碰撞仍可能发生
+    """
+
     x1, y1 = start_state[0], start_state[1]
     x2, y2 = end_state[0], end_state[1]
     
@@ -379,7 +382,7 @@ def safe_rrt_search(start_indices, goal_xy_indices, S_infinity, obstacle_indices
         # 4. 角度安全性检查
         q_near_pos = nearest_node.state[:2]
         ix, iy, itheta = discretize_state(q_near_pos[0], q_near_pos[1], theta_desired)
-        
+        # 这里角度的限制尤其需要谨慎，是最影响性能的地方
         # theta_target = None
         # if (ix, iy, itheta) in S_infinity:
         #     theta_target = theta_desired
@@ -1026,8 +1029,8 @@ if __name__ == "__main__":
 
 """
 # def compute_robust_safe_set(obstacle_indices, W, goal_continuous, goal_tolerance=0.5):
-#     """计算鲁棒安全集 - 目标区域作为黑洞处理
-    
+#     """计算鲁棒安全集 - 目标区域作为黑洞处理（构想阶段）
+
 #     Args:
 #         obstacle_indices: 障碍物位置集合
 #         W: 扰动集

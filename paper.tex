@@ -20,11 +20,11 @@ Safety-Critical Embodied
 Autonomous Agents
 }
 
-\author{\IEEEauthorblockN{1\textsuperscript{st} Given Name Surname}
-\IEEEauthorblockA{\textit{dept. name of organization (of Aff.)} \\
-\textit{name of organization (of Aff.)}\\
-City, Country \\
-email address or ORCID}
+\author{\IEEEauthorblockN{1\textsuperscript{st} Ziyu Song}
+\IEEEauthorblockA{\textit{School of Electronic and Information Engineerin} \\
+\textit{Tongji University}\\
+Shanghai, China \\
+184521004@qq.com}
 \and
 \IEEEauthorblockN{2\textsuperscript{nd} Given Name Surname}
 \IEEEauthorblockA{\textit{dept. name of organization (of Aff.)} \\
@@ -55,7 +55,7 @@ embodied autonomous agents, robust control invariant sets, safe path planning, s
 \section{Introduction}
 \label{sec:intro}
 
-The last decade has witnessed remarkable progress in embodied autonomy, enabling mobile robots, aerial vehicles, and self-driving cars to leave controlled laboratories and enter dynamic, human-populated environments.  In such safety-critical domains a single planning error can cause equipment damage or jeopardize human lives, so \emph{provable} safety guarantees are not a luxury but a necessity.  Classical path-planning algorithms, such as A* and the Rapidly-exploring Random Tree (RRT), are fundamental to robot navigation but provide no formal safety guarantees against the uncertainties inherent in real-world operation \cite{lavalle2006planning}. This limitation has motivated the integration of formal methods from control theory to ensure provable safety.   Their resulting paths often graze obstacle boundaries, contain numerous sharp turns, and provide no certificate that the system will remain collision-free when model uncertainty, actuation limits, or exogenous disturbances are taken into account \cite{elbanhawi2014sampling}.
+ The last decade has witnessed remarkable progress in embodied autonomy, enabling mobile robots, aerial vehicles, and self-driving cars to leave controlled laboratories and enter dynamic, human-populated environments.  In such safety-critical domains a single planning error can cause equipment damage or jeopardize human lives, so \emph{provable} safety guarantees are not a luxury but a necessity.  Classical path-planning algorithms, such as A* and the Rapidly-exploring Random Tree (RRT), are fundamental to robot navigation but provide no formal safety guarantees against the uncertainties inherent in real-world operation \cite{lavalle2006planning}. This limitation has motivated the integration of formal methods from control theory to ensure provable safety.   Their resulting paths often graze obstacle boundaries, contain numerous sharp turns, and provide no certificate that the system will remain collision-free when model uncertainty, actuation limits, or exogenous disturbances are taken into account \cite{elbanhawi2014sampling}.
 
 To bridge this gap, the robotics and control communities have begun to embrace \emph{formal methods}, which supply mathematically rigorous certificates of correct behavior.  Among the set-theoretic techniques, the \textit{robust controlled invariant set} (RCIS) is especially attractive: it is the largest subset of the state space from which a feedback control action exists that can keep the system inside the set for all future time despite bounded disturbances \cite{rakovic2005invariant,rungger2016computing}.  Membership in an RCIS therefore becomes an inexpensive, online safety test that replaces repeated reachability computations or real-time optimization.
 
@@ -414,7 +414,7 @@ Path Length (steps) & \textbf{16} & 17 \\
 
 To obtain statistically significant results, each RRT planner was executed 1000 times with a budget of 2000 iterations per run. The averaged results are presented in Table~\ref{tab:rrt_performance}. Safe RRT reduces planning time by approximately 32\% and grows a 28\% smaller search tree. This is because the constraint $\mathbf{x}_{\text{new}}\in\mathcal{S}_\infty$ acts as a powerful heuristic, preventing the tree from exploring vast, provably unsafe regions of the state space. This focused exploration is clearly visible in Figure~\ref{fig:rrt_comparison}.
 
-\begin{table}[h]
+\begin{table}[h!]
 \centering
 \caption{Average Performance of RRT Variants (100 runs)}
 \label{tab:rrt_performance}
@@ -437,12 +437,12 @@ The experimental results consistently demonstrate that, across both search-based
 
 \section{Conclusion}
 \label{sec:conclusion}
-
-In this paper, we introduced a novel framework that enhances classical path-planning algorithms with provable safety guarantees by leveraging the power of Robust Control Invariant Sets (RCIS). We addressed the critical limitation of popular planners like A* and RRT, whose performance degrades under model uncertainty and external disturbances. Our core contribution is a practical methodology that decouples the computationally intensive safety analysis from the online planning phase. By pre-computing the maximal RCIS and a corresponding Safe Action Set, we provide planners with an efficient, constant-time mechanism to verify and enforce robust safety during execution.
+In this paper, we introduced a novel framework that enhances classical path-planning algorithms with provable safety guarantees by leveraging the  Robust Control Invariant Sets (RCIS). We addressed the critical limitation of popular planners like A* and RRT, improved robustness and enhanced efficiency. Our core contribution is a practical methodology that decouples the computationally intensive safety analysis from the online planning phase. By pre-computing the maximal RCIS and a corresponding Safe Action Set, we provide planners with an efficient, constant-time mechanism to verify and enforce robust safety during execution.
 
 Our experiments demonstrated the effectiveness of this approach. The proposed Safe A* and Safe RRT algorithms not only generated paths with superior safety margins but also exhibited significant improvements in computational efficiency. Safe A* achieved an order-of-magnitude speedup in planning time, while Safe RRT reduced search effort by nearly 30\% by intelligently pruning unsafe regions of the state space. These results validate that integrating formal, set-theoretic methods does not merely add a layer of safety but can also act as a powerful heuristic to streamline the planning process.
 
-Future work will proceed along several promising directions. First, while effective, the grid-based RCIS computation faces scalability challenges with higher-dimensional systems. We plan to explore more scalable techniques, such as symbolic methods or function approximation, to extend our framework to more complex dynamics. Second, the current approach assumes a static environment; future research will focus on developing methods for efficiently updating the RCIS or adapting the safe action set in response to dynamic obstacles. Finally, we aim to validate the proposed framework on physical hardware to demonstrate its real-world applicability and robustness in safety-critical robotic applications.
+Future work will proceed along several promising directions. While effective, the grid-based RCIS computation faces scalability challenges with higher-dimensional systems. Second, the current approach assumes a static velocity; future research will focus on developing methods for variable-speed movement. Finally, we aim to validate the proposed framework on physical hardware to demonstrate its real-world applicability and robustness in safety-critical robotic applications.
+
 
 % ==============================  References  ==============================
 \begin{thebibliography}{99}
