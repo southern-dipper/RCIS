@@ -1,0 +1,499 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+% The preceding line is only needed to identify funding in the first footnote. If that is unneeded, please comment it out.
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{float}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{amsmath}  
+\usepackage{xcolor}
+\usepackage{float}
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+\begin{document}
+
+\title{RCI-Enhanced Planning for
+Safety-Critical Embodied
+Autonomous Agents
+}
+
+\author{\IEEEauthorblockN{1\textsuperscript{st} Given Name Surname}
+\IEEEauthorblockA{\textit{dept. name of organization (of Aff.)} \\
+\textit{name of organization (of Aff.)}\\
+City, Country \\
+email address or ORCID}
+\and
+\IEEEauthorblockN{2\textsuperscript{nd} Given Name Surname}
+\IEEEauthorblockA{\textit{dept. name of organization (of Aff.)} \\
+\textit{name of organization (of Aff.)}\\
+City, Country \\
+email address or ORCID}
+\and
+\IEEEauthorblockN{3\textsuperscript{rd} Given Name Surname}
+\IEEEauthorblockA{\textit{dept. name of organization (of Aff.)} \\
+\textit{name of organization (of Aff.)}\\
+City, Country \\
+email address or ORCID}
+}
+
+
+\maketitle
+
+\begin{abstract}
+Ensuring the safety of embodied autonomous agents—from mobile robots to self-driving vehicles—remains elusive because of the long-tail of rare yet high-risk scenarios. Popular planning methods, including A* and Rapidly-exploring Random Tree (RRT), while demonstrating strong capabilities across a wide range of planning tasks,fail to provide robust safety assurance when confronted with model uncertainty and environmental disturbances. Hence, we propose to integrate the invariant set theory with popular planning methods to achieve enhanced safety as well as efficiency. In particular, we utilize offline computed Robust Controlled Invariant Set (RCIS) to guard online planning, delivering provable safety guarantees while maintaining computational efficiency.
+
+
+\end{abstract}
+
+\begin{IEEEkeywords}
+embodied autonomous agents, robust control invariant sets, safe path planning, safety-critical control,A*, RRT
+\end{IEEEkeywords}
+
+\section{Introduction}
+\label{sec:intro}
+
+The last decade has witnessed remarkable progress in embodied autonomy, enabling mobile robots, aerial vehicles, and self-driving cars to leave controlled laboratories and enter dynamic, human-populated environments.  In such safety-critical domains a single planning error can cause equipment damage or jeopardize human lives, so \emph{provable} safety guarantees are not a luxury but a necessity.  Classical path-planning algorithms, such as A* and the Rapidly-exploring Random Tree (RRT), are fundamental to robot navigation but provide no formal safety guarantees against the uncertainties inherent in real-world operation \cite{lavalle2006planning}. This limitation has motivated the integration of formal methods from control theory to ensure provable safety.   Their resulting paths often graze obstacle boundaries, contain numerous sharp turns, and provide no certificate that the system will remain collision-free when model uncertainty, actuation limits, or exogenous disturbances are taken into account \cite{elbanhawi2014sampling}.
+
+To bridge this gap, the robotics and control communities have begun to embrace \emph{formal methods}, which supply mathematically rigorous certificates of correct behavior.  Among the set-theoretic techniques, the \textit{robust controlled invariant set} (RCIS) is especially attractive: it is the largest subset of the state space from which a feedback control action exists that can keep the system inside the set for all future time despite bounded disturbances \cite{rakovic2005invariant,rungger2016computing}.  Membership in an RCIS therefore becomes an inexpensive, online safety test that replaces repeated reachability computations or real-time optimization.
+
+Existing approaches exploit invariant sets in three principal ways.  The invariant-set motion planner (ISMP) pieces together many small, overlapping invariant “bubbles’’ and performs a high-level graph search over them \cite{danielson2020motion,danielson2022invariant}.  Robust model-predictive controllers and fail-safe planners embed a \emph{global} RCIS merely as a terminal constraint, guaranteeing that each planned trajectory ends inside a set from which a passive braking maneuver is possible \cite{vaskov2019guaranteed,pek2021fail}.  Control-barrier-function (CBF) filters add safety on top of an arbitrary nominal controller by solving a quadratic program at each control cycle \cite{ames2019control,wang2017safety}.  While effective in their respective niches, none of these paradigms \emph{directly} use a pre-computed maximal RCIS to steer the search of ubiquitous baseline planners such as A* and RRT.  Local “bubble’’ approaches compromise optimality and entail significant offline storage; terminal constraints treat the RCIS as a passive safety envelope rather than an active guide; and CBFs shift the computational burden entirely to run time and scale poorly to high-speed or resource-constrained platforms.
+
+This paper addresses the open question of how to convert the global, state-space information encoded by a maximal RCIS into actionable guidance for low-level search algorithms.  We introduce an RCI-Enhanced Planning framework in which a \emph{Safe Action Set}, computed once offline, translates state-based safety information into a compact set of admissible local actions.  During online planning, A* or RRT queries this set on-the-fly to prune nodes that would inevitably exit the RCIS under worst-case disturbances and to bias its exploration toward disturbance-robust regions.  In effect, the RCIS is transformed from a passive certificate into an active heuristic, endowing classical planners with provable safety while preserving their celebrated efficiency.
+
+The main contributions are threefold.  \emph{First}, we formalize the Safe Action Set and prove that any trajectory generated under its guidance remains inside the maximal RCIS, hence is robustly safe.  \emph{Second}, we present simple yet effective modifications to A* and RRT that require only constant-time queries to the set, incurring negligible overhead relative to their vanilla counterparts.  \emph{Third}, we conduct extensive simulations on multi-obstacle navigation and lane-keeping benchmarks, showing that the proposed planners achieve higher success rates, shorter paths, and up to an order-of-magnitude reduction in computation time compared with baseline and CBF-filtered variants.
+
+The remainder of the paper is organised as follows.  Section~\ref{sec:problem} formalises the discrete-time dynamics, grid representation, and disturbance model.  Section~\ref{sec:framework} details the RCIS computation and its integration into A* and RRT.  Section~\ref{sec:experiments} reports quantitative results and ablation studies.  Finally, Section~\ref{sec:conclusion} concludes the paper and outlines avenues for future research.
+
+\section{Problem Formulation}\label{sec:problem}
+
+\subsection{Dynamics and Discretisation}
+
+We start from the generic continuous model
+\begin{equation}
+\dot{\mathbf x}(t)=f\!\bigl(\mathbf x(t),\mathbf u(t)\bigr)+\mathbf w(t),
+\qquad
+\mathbf w(t)\in\mathcal W ,
+\label{eq:generic_continuous}
+\end{equation}
+
+For ground vehicles,the state is $\mathbf{x} = [x, y, \theta]^T$. While the general control vector is $\mathbf{u} = [v, \omega]^T$, our specific implementation assumes a constant forward velocity $v$ and treats the angular velocity $\omega$ as the sole control input. We use the unicycle kinematics
+$\dot x = V\cos\theta,\;
+ \dot y = V\sin\theta,\;
+ \dot\theta = \omega$.
+Sampling with period $\Delta t$ gives two practical update rules.
+
+\paragraph{Forward Euler (used by Safe A*)}
+\begin{align}
+x_{k+1}       &= x_k       + V\cos\theta_k\,\Delta t + w_{x,k},\\
+y_{k+1}       &= y_k       + V\sin\theta_k\,\Delta t + w_{y,k},\\
+\theta_{k+1}  &= \theta_k  + \omega_k\,\Delta t  +w_{\theta,k}    .
+\end{align}
+
+\paragraph{Mid--point RK2 (used by Safe RRT)}
+\begin{align}
+\theta_{k+\frac12} &= \theta_k + \tfrac12\,\omega_k\,\Delta t,\\
+x_{k+1}            &= x_k + V\cos\theta_{k+\frac12}\,\Delta t + w_{x,k},\\
+y_{k+1}            &= y_k + V\sin\theta_{k+\frac12}\,\Delta t + w_{y,k},\\
+\theta_{k+1}       &= \theta_k + \omega_k\,\Delta t +w_{\theta,k}.
+\end{align}
+
+Both discretisations share the same disturbance terms
+$\bigl(w_{x,k},w_{y,k},w_{\theta,k}\bigr)$, so the robust-invariant
+safety analysis developed later applies uniformly to Safe\,A* and
+Safe\,RRT.
+
+\subsection{State Space Discretization.}
+To manage the complexity of continuous space, we discretize the state space into a regular grid tessellation. The resolution is defined by $\boldsymbol{\Delta} = [\Delta_1, \Delta_2, \ldots, \Delta_n]$, where $\Delta_i$ is the side length of a cell along the $i$-th dimension. Each cell $C_k$ represents a hyperrectangle in the continuous space:
+\begin{equation}
+C_k = \prod_{i=1}^n [a_{k,i}, a_{k,i} + \Delta_i)
+\label{eq:cell_definition}
+\end{equation}
+where $a_{k,i}$ is the lower bound of cell $C_k$ in dimension $i$. Any discrete set $\mathcal{S}$ can be expressed as a finite cell complex for some finite index set i:
+\begin{equation}
+\mathcal{S} = \bigcup_{i \in I} C_i
+\label{eq:discrete_set_union}
+\end{equation}
+This discretization enables finite computational algorithms while maintaining correspondence with the original continuous safety constraints defined over $\mathcal{X}_{\text{safe}}$. 
+
+\subsection{Safety-Critical Path Planning Problem}
+
+The fundamental challenge in embodied autonomous systems is to synthesize control policies that guarantee safety under all admissible disturbances while achieving specified mission objectives. We formulate this as a constrained optimal control problem:
+
+\begin{subequations}
+\label{eq:discrete_path_planning}
+\begin{align}
+\min_{\{\mathbf u_t\}_{t=0}^{T-1}} \quad 
+    & J\!\bigl(\{\mathbf x_t\}_{t=0}^{T},\{\mathbf u_t\}_{t=0}^{T-1}\bigr) 
+    \label{eq:disc_objective}\\[4pt]
+\text{s.t.}\quad 
+    & \mathbf x_{t+1} = g(\mathbf x_t,\mathbf u_t) + \mathbf w_t, 
+      && t = 0,\dots,T-1 
+      \label{eq:disc_dyn}\\
+    & \mathbf u_t \in \mathcal U, 
+      && t = 0,\dots,T-1 
+      \label{eq:disc_ctrl}\\
+    & \mathbf x_t \in \mathcal X_{\mathrm{safe}},\ \forall\mathbf w_t\!\in\!\mathcal W,
+      && t = 0,\dots,T
+      \label{eq:disc_safe}\\
+    & \mathbf x_0 = \mathbf x_{\mathrm{start}},\quad 
+      \mathbf x_T \in \mathcal X_{\mathrm{goal}}
+      \label{eq:disc_boundary}
+\end{align}
+\end{subequations}
+
+where $J(\cdot)$ is the cost functional to be minimised,
+$\mathcal X_{\mathrm{safe}}$ is the portion of the workspace that is
+free of obstacles and other hazards, and
+$\mathcal X_{\mathrm{goal}}$ denotes the desired terminal region.
+
+Demanding that the state remain in $\mathcal X_{\mathrm{safe}}$ for
+\emph{every} admissible disturbance $w_k\!\in\!\mathcal W$ turns the
+problem into a \emph{semi-infinite} optimisation: the decision variables
+are finite, but the constraints must hold for an
+infinite family of disturbance realisations.  Tackling such a problem
+head-on is infeasible except for toy examples.  Our workaround is to
+pre-compute a \emph{Robust Control Invariant Set} (RCIS).  Once this set
+is available, checking safety reduces to a simple membership test
+$\mathbf x\in\text{RCIS}$ that can be executed online with negligible
+overhead, yet it provides the same worst-case guarantee as the original
+semi-infinite formulation.
+
+\section{The RCI-Constrained Planning Framework}
+\label{sec:framework}
+
+To address the challenge of safety under uncertainty, we introduce a planning framework that decouples robust safety verification from the online search process. This is achieved by pre-computing a provably safe operational envelope for the agent. This section first details the theory and offline computation of this envelope, known as the Robust Control Invariant (RCI) set, and then presents two concrete algorithms, Safe A* and Safe RRT, that leverage it to guarantee robust safety during online planning.
+
+\subsection{Offline Computation of the Robustly Safe Envelope}
+
+The foundation of our framework is the offline computation of the maximal RCI set and its associated safe actions.
+
+\subsubsection{Robust Contorl Invariant Sets}
+We first define the set of all states from which the agent can guarantee its safety indefinitely.
+
+
+\textbf{Definition 1 (Robust Contorl Invariant Set):} Given the discrete-time system $\mathbf{x}_{k+1} = F(\mathbf{x}_k, \mathbf{u}_k, \mathbf{w}_k)$, the state constraint set $\mathcal{X}_{\text{safe}}$, and the disturbance set $\mathcal{W}$, a set $\mathcal{S}_\infty \subseteq \mathcal{X}_{\text{safe}}$ is an RCI set if:
+\begin{equation}
+\forall \mathbf{x} \in \mathcal{S}_\infty, \exists \mathbf{u} \in \mathcal{U} \text{ such that } F(\mathbf{x}, \mathbf{u}, \mathbf{w}) \in \mathcal{S}_\infty, \quad \forall \mathbf{w} \in \mathcal{W}
+\label{eq:RCI_definition}
+\end{equation}
+The maximal RCI set is computed via the iterative backward reachability algorithm detailed in Algorithm~\ref{alg:compute_Sinf}.
+\begin{algorithm}[h]
+    \caption{Computation of the Maximal RCI Set ($\mathcal{S}_\infty$)}
+    \label{alg:compute_Sinf}
+    \begin{algorithmic}[1]
+        \Require Initial safe set $\mathcal{X}_{\text{safe}}$, dynamics $F$, action space $\mathcal{U}$, disturbance set $\mathcal{W}$
+        \Ensure The maximal RCI set $\mathcal{S}_\infty$
+        \State $k \gets 0$, \;$\mathcal{S}_{0} \gets \mathcal{X}_{\text{safe}}$
+        \Repeat
+            \State $\mathcal{S}_{k+1} \gets \emptyset$
+            \ForAll{state $\mathbf{x} \in \mathcal{S}_{k}$}
+                \State \textit{has\_safe\_action} $\gets$ false
+                \ForAll{action $\mathbf{u} \in \mathcal{U}$}
+                    \State \textit{is\_action\_robustly\_safe} $\gets$ true
+                    \ForAll{disturbance $\mathbf{w} \in \mathcal{W}$}
+                        \If{$F(\mathbf{x},\mathbf{u},\mathbf{w}) \notin \mathcal{S}_{k}$}
+                            \State \textit{is\_action\_robustly\_safe} $\gets$ false
+                            \State \textbf{break} 
+                        \EndIf
+                    \EndFor
+                    \If{\textit{is\_action\_robustly\_safe}}
+                        \State \textit{has\_safe\_action} $\gets$ true
+                        \State \textbf{break} 
+                    \EndIf
+                \EndFor
+                \If{\textit{has\_safe\_action}}
+                    \State $\mathcal{S}_{k+1} \gets \mathcal{S}_{k+1} \cup \{\mathbf{x}\}$
+                \EndIf
+            \EndFor
+            \State $k \gets k + 1$
+        \Until{$\mathcal{S}_{k}=\mathcal{S}_{k-1}$}
+        \State \Return $\mathcal{S}_\infty = \mathcal{S}_{k}$
+    \end{algorithmic}
+\end{algorithm}
+\\
+\textbf{Theoretical Properties:} The methods  possesses two critical properties: \\
+(1)\textbf{Convergence Guarantee}:ensuring that for a finite state space, Algorithm~\ref{alg:compute_Sinf} converges to the unique maximal RCI set in a finite number of steps. \\
+(2) \textbf{Safety Guarantee}: ensuring any trajectory confined to the resulting set $\mathcal{S}_\infty$ is safe.\\
+
+\subsubsection{Safe Action Set Computation}
+For search-based planners, we can further pre-compute a set from each safe state to its corresponding set of safe actions. This is formalized in Definition 2 and computed via Algorithm~\ref{alg:precompute_safe_actions}.
+
+\textbf{Definition 2 (Safe Action Set):} For each state $\mathbf{x} \in \mathcal{S}_\infty$, its safe action set is defined as:
+\begin{equation}
+\mathcal{U}_{\text{safe}}(\mathbf{x}) = \{\mathbf{u} \in \mathcal{U} : F(\mathbf{x}, \mathbf{u}, \mathbf{w}) \in \mathcal{S}_\infty, \forall \mathbf{w} \in \mathcal{W}\}
+\label{eq:safe_action_set}
+\end{equation}
+
+The resulting lookup table, or "Safe Action Set" $\mathcal{M}$, is a function that maps each safe state in $\mathcal{S}_\infty$ to the set of safe actions from $\mathcal{U}$. In formal notation, $\mathcal{M}: \mathcal{S}_\infty \to 2^\mathcal{U}$, where $2^\mathcal{U}$ represents the power set (the set of all subsets) of $\mathcal{U}$.
+\begin{algorithm}[H]
+    \caption{Precomputation of the Safe Action Set ($\mathcal{M}$)}
+    \label{alg:precompute_safe_actions}
+    \begin{algorithmic}[1]
+        \Require Final RCI Set $\mathcal{S}_\infty$, dynamics $F$, action space $\mathcal{U}$, disturbance set $\mathcal{W}$
+        \Ensure Safe action set $\mathcal{M}: \mathcal{S}_\infty \to 2^{\mathcal{U}}$
+        \State Initialize set $\mathcal{M}$
+        \ForAll{state $\mathbf{x} \in \mathcal{S}_\infty$}
+            \State $\mathcal{U}_{\text{safe}}(\mathbf{x}) \gets \emptyset$
+            \ForAll{action $\mathbf{u} \in \mathcal{U}$}
+                \State \textit{is\_action\_robustly\_safe} $\gets$ true
+                \ForAll{disturbance $\mathbf{w} \in \mathcal{W}$}
+                    \If{$F(\mathbf{x}, \mathbf{u}, \mathbf{w}) \notin \mathcal{S}_\infty$}
+                        \State \textit{is\_action\_robustly\_safe} $\gets$ false
+                        \State \textbf{break}
+                    \EndIf
+                \EndFor
+                \If{\textit{is\_action\_robustly\_safe}}
+                    \State $\mathcal{U}_{\text{safe}}(\mathbf{x}) \gets \mathcal{U}_{\text{safe}}(\mathbf{x}) \cup \{\mathbf{u}\}$
+                \EndIf
+            \EndFor
+            \State $\mathcal{M}(\mathbf{x}) \gets \mathcal{U}_{\text{safe}}(\mathbf{x})$
+        \EndFor
+        \State \Return $\mathcal{M}$
+    \end{algorithmic}
+\end{algorithm}
+
+
+\subsection{Online Planning with RCI Constraints}
+With the RCI set $\mathcal{S}_\infty$ and the Safe Action Set $\mathcal{M}$ pre-computed, the online planners can enforce safety using efficient lookups.
+
+\subsubsection{Safe A*: Search-Based Planning with a Safe Action Set}
+Our Safe A* variant integrates the RCI constraint by modifying its node expansion step.
+As detailed in Algorithm~\ref{alg:safe_astar}, the standard A* search over all actions is replaced with a targeted search over only the pre-computed safe actions (line 9). This guarantees that every explored state transition is robustly safe, as the set $\mathcal{M}$ has already certified that these actions will keep the system within $\mathcal{S}_\infty$. This modification dramatically prunes the search tree and eliminates the need for repeated safety checks during the search.
+
+\begin{algorithm}[t]
+    \caption{Safe A* Algorithm}
+    \label{alg:safe_astar}
+    \begin{algorithmic}[1]
+        \Require Start state $\mathbf{x}_{\text{start}}$, goal region $\mathcal{X}_{\text{goal}}$, Safe Action Set $\mathcal{M}$
+        \Ensure Safe path $\pi^*$ or FAILURE
+        \State OPEN $\gets \{\mathbf{x}_{\text{start}}\}$, CLOSED $\gets \emptyset$
+        \State $g(\mathbf{x}_{\text{start}}) \gets 0$, $f(\mathbf{x}_{\text{start}}) \gets h(\mathbf{x}_{\text{start}})$
+        \While{OPEN $\neq \emptyset$}
+            \State $\mathbf{x}_{\text{current}} \gets \arg\min_{\mathbf{x} \in \text{OPEN}} f(\mathbf{x})$
+            \If{$\mathbf{x}_{\text{current}} \in \mathcal{X}_{\text{goal}}$} \Return ReconstructPath($\mathbf{x}_{\text{current}}$) \EndIf
+            \State OPEN $\gets$ OPEN $\setminus \{\mathbf{x}_{\text{current}}\}$; 
+            CLOSED $\gets$ CLOSED $\cup \{\mathbf{x}_{\text{current}}\}$
+            
+            \ForAll{action $\mathbf{u} \in \mathcal{M}(\mathbf{x}_{\text{current}})$} 
+                \State $\mathbf{x}_{\text{next}} \gets F(\mathbf{x}_{\text{current}}, \mathbf{u}, \mathbf{0})$ 
+                \If{$\mathbf{x}_{\text{next}} \in \text{CLOSED}$} \textbf{continue} \EndIf
+                
+                \State $g_{\text{tentative}} \gets g(\mathbf{x}_{\text{current}}) + c(\mathbf{x}_{\text{current}}, \mathbf{u})$
+                \If{$g_{\text{tentative}} < g(\mathbf{x}_{\text{next}})$ \textbf{or} $\mathbf{x}_{\text{next}} \notin$ OPEN}
+                    \State Update parent and costs for $\mathbf{x}_{\text{next}}$
+                    \If{$\mathbf{x}_{\text{next}} \notin$ OPEN} \State OPEN $\gets$ OPEN $\cup \{\mathbf{x}_{\text{next}}\}$ \EndIf
+                \EndIf
+            \EndFor
+        \EndWhile
+        \State \Return FAILURE
+    \end{algorithmic}
+\end{algorithm}
+
+\subsubsection{Safe RRT: Sampling-Based Planning with Local Correction}
+Our Safe RRT variant integrates the RCI constraint using a two-stage safety verification strategy, detailed in Algorithm~\ref{alg:safe_rrt_detailed}. This approach improves the success rate in complex environments without requiring an explicit safe action set.
+
+\textbf{Safety Verification Strategy:}
+\begin{enumerate}
+    \item \textbf{Direct Extension (Stage 1):} The algorithm examines the angle security of the direction to be expanded and conducts security verification for the expansion point. The resulting state $\mathbf{x}_{\text{new}}$ is checked for safety by a simple membership query: if $\mathbf{x}_{\text{new}} \in \mathcal{S}_\infty$, it is added to the tree.
+    \item \textbf{Local Correction (Stage 2):} If the direct extension fails, a local correction mechanism searches a small, discretized neighborhood around the unsafe $\mathbf{x}_{\text{new}}$ for an alternative state $\mathbf{x}_{\text{corrected}}$ that lies within $\mathcal{S}_\infty$. If a valid and kinematically feasible candidate is found, it is added to the tree instead.
+\end{enumerate}
+
+\begin{algorithm}[t]
+    \caption{Safe RRT Algorithm}
+    \label{alg:safe_rrt_detailed}
+    \begin{algorithmic}[1]
+        \Require Start $\mathbf{x}_{\text{start}}$, goal region $\mathcal{X}_{\text{goal}}$, RCI Set $\mathcal{S}_\infty$, iterations $N_{\max}$
+        \Ensure Safe path or FAILURE
+        \State $\mathcal{T}$.V $\gets \{\mathbf{x}_{\text{start}}\}$
+        \If{$\mathbf{x}_{\text{start}} \notin \mathcal{S}_\infty$} \Return FAILURE \EndIf
+        \For{$i = 1$ to $N_{\max}$}
+            \State $\mathbf{x}_{\text{rand}} \gets$ Sample() 
+            \State $\mathbf{x}_{\text{near}} \gets$ NearestNode($\mathcal{T}, \mathbf{x}_{\text{rand}}$)
+            \State $\theta_{\text{desired}} \gets$ atan2($\mathbf{x}_{\text{rand}}.y - \mathbf{x}_{\text{near}}.y$, $\mathbf{x}_{\text{rand}}.x - \mathbf{x}_{\text{near}}.x$)
+            \State $\omega_{\text{req}} \gets (\theta_{\text{desired}} - \mathbf{x}_{\text{near}}.\theta) / \Delta t$
+            \If{$\omega_{\text{req}} \notin [\omega_{\min}, \omega_{\max}]$} 
+            
+            \textbf{continue} \EndIf
+            
+            \State $\delta \gets \min(\|\mathbf{x}_{\text{rand}} - \mathbf{x}_{\text{near}}\|, v_{\max} \cdot \Delta t)$
+            \State $\mathbf{x}_{\text{new}} \gets \mathbf{x}_{\text{near}} + \delta \cdot [\cos(\theta_{\text{desired}}), \sin(\theta_{\text{desired}}), \theta_{\text{desired}}]$
+            
+            \State \textit{node\_to\_add} $\gets$ null
+            \If{$\mathbf{x}_{\text{new}} \in \mathcal{S}_\infty$ \textbf{and} CollisionFree($\mathbf{x}_{\text{near}}, \mathbf{x}_{\text{new}}$)} 
+                \State \textit{node\_to\_add} $\gets \mathbf{x}_{\text{new}}$
+            \Else 
+                \State $\mathbf{x}_{\text{corrected}} \gets$ FindSafeNeighbor($\mathbf{x}_{\text{new}}, \mathcal{S}_\infty$)
+                \If{$\mathbf{x}_{\text{corrected}} \neq \text{null}$}
+                    \State $\theta_{\text{approach}} \gets$ atan2($\mathbf{x}_{\text{corrected}}.y - \mathbf{x}_{\text{near}}.y$, $\mathbf{x}_{\text{corrected}}.x - \mathbf{x}_{\text{near}}.x$)
+                    \State $\mathbf{x}_{\text{final}} \gets [\mathbf{x}_{\text{corrected}}.x, \mathbf{x}_{\text{corrected}}.y, \theta_{\text{approach}}]$
+                    \If{KinematicallyFeasible($\mathbf{x}_{\text{near}}, \mathbf{x}_{\text{final}}$) \textbf{and} CollisionFree($\mathbf{x}_{\text{near}}, \mathbf{x}_{\text{final}}$)}
+                        \State \textit{node\_to\_add} $\gets \mathbf{x}_{\text{final}}$
+                    \EndIf
+                \EndIf
+            \EndIf
+            
+            \If{\textit{node\_to\_add} $\neq$ null}
+                \State AddNodeAndEdge($\mathcal{T}, \mathbf{x}_{\text{near}},$ \textit{node\_to\_add})
+                \If{\textit{node\_to\_add} $\in \mathcal{X}_{\text{goal}}$}
+                    \State \Return ReconstructPath(\textit{node\_to\_add}) 
+                \EndIf
+            \EndIf
+        \EndFor
+        \State \Return FAILURE
+    \end{algorithmic}
+\end{algorithm}
+
+\section{Experimental Evaluation}
+\label{sec:experiments}
+We conduct a series of experiments to validate our RCI-constrained planning framework.
+
+\subsection{Experimental Setup}
+
+\paragraph{System and Environment.}
+We employ the unicycle kinematic model with parameters consistent across experiments. The state space is a lattice defined over $x,y \in [-1,11]$~m (with resolution $\Delta x=\Delta y=0.5$~m) and $\theta \in [-\pi,\pi)$ (with $\Delta\theta=\pi/8$, yielding 16 headings). The control space $\mathcal{U}$ consists of 7 discrete angular velocity actions $\omega \in [-3\pi/8, 3\pi/8]$. The nominal forward velocity is fixed at $v=0.99$~m/s with a time step of $\Delta t=1.0$~s. The planning task is set in a cluttered $12 \times 12$~m set with 76 non-convex obstacle cells, with start $\mathbf{x}_{\text{start}}=[0,0,\pi/4]$ and goal $\mathbf{x}_{\text{goal}}=[10,10]$.
+
+\paragraph{Disturbance Model.}
+The disturbance set $\mathcal{W}$ models worst-case positioning uncertainty. To ensure tractability while covering uncertainties from sensor noise and discretization effects, we consider discrete corner points of the uncertainty hypercube:
+\begin{equation}
+\mathcal{W} = \left\{\mathbf{w} : w_i \in \left\{\pm\left(\frac{\Delta_i}{2}+\delta\right)\right\} \text{ for spatial dimensions}\right\}
+\end{equation}
+where $\delta=10^{-3}$~m provides numerical robustness.
+
+
+\paragraph{Compared Algorithms.}
+We evaluate our proposed \textbf{Safe A*} and \textbf{Safe RRT} against their standard baselines (\textbf{Standard A*}, \textbf{Standard RRT}), which use nominal dynamics and simple collision checking.
+
+\subsection{Offline Cost: RCI Set Computation}
+
+Starting from an initial set of $|\mathcal{S}_0|=8,784$ feasible states, the backward reachability algorithm (Alg.~\ref{alg:compute_Sinf}) converged in 16 iterations. The final maximal RCI set contains $|\mathcal{S}_\infty|=4,238$ states, a 51.7\% reduction of the operational space. The computation took approximately 24 seconds on a standard laptop (Intel i7, single-core Python implementation). As this is a one-time cost per set, it is amortized over all subsequent planning queries and is considered negligible in typical mission profiles. Figure~\ref{fig:arrow} visualizes the computed safe headings.
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=1\columnwidth]{safe_angle_arrows.png}
+    \caption{The pre-computed RCI set visualized. Green arrows represent headings from which the system's safety can be robustly guaranteed. Red arrows are unsafe headings rejected by the algorithm. Obstacles are in black.}
+    \label{fig:arrow}
+\end{figure}
+
+\subsection{Online Planning Performance}
+
+\subsubsection{Safe A* vs. Standard A*}
+
+The online performance comparison for A* variants is shown in Table~\ref{tab:astar_performance}. Safe A* is an order of magnitude faster because its search is guided by the pre-computed Safe Action Set, which prunes all actions leading to non-RCI states, thus avoiding expensive online collision checks. This efficiency comes at the negligible cost of one extra step in path length. Figure~\ref{fig:path_comparison} qualitatively confirms that Safe A* generates a path with a larger, more robust safety margin around obstacles.
+
+\begin{table}[h!]
+\centering
+\caption{Performance Comparison for A* Variants}
+\label{tab:astar_performance}
+\begin{tabular}{|l|c|c|}
+\hline
+\textbf{Metric} & \textbf{Standard A*} & \textbf{Safe A*} \\
+\hline
+Planning Time (s) & 0.242 & \textbf{0.023} \\
+Nodes Expanded & 1049 & \textbf{649} \\
+Path Length (steps) & \textbf{16} & 17 \\
+\hline
+\end{tabular}
+\end{table}
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=0.9\columnwidth]{path_planning_comparison.png}
+    \caption{Standard A* (red, dashed) vs. Safe A* (blue, solid). The robust path maintains a larger clearance, while the baseline path cuts corners, indicating vulnerability.}
+    \label{fig:path_comparison}
+\end{figure}
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.9\columnwidth]{rrt_path_planning_comparison.png}
+    \caption{Standard RRT (red) explores wide areas, many of which are unsafe. Safe RRT (blue) is guided by the RCI set, resulting in a more compact and efficient search tree.}
+    \label{fig:rrt_comparison}
+\end{figure}
+\subsubsection{Safe RRT vs. Standard RRT}
+
+To obtain statistically significant results, each RRT planner was executed 1000 times with a budget of 2000 iterations per run. The averaged results are presented in Table~\ref{tab:rrt_performance}. Safe RRT reduces planning time by approximately 32\% and grows a 28\% smaller search tree. This is because the constraint $\mathbf{x}_{\text{new}}\in\mathcal{S}_\infty$ acts as a powerful heuristic, preventing the tree from exploring vast, provably unsafe regions of the state space. This focused exploration is clearly visible in Figure~\ref{fig:rrt_comparison}.
+
+\begin{table}[h]
+\centering
+\caption{Average Performance of RRT Variants (100 runs)}
+\label{tab:rrt_performance}
+\begin{tabular}{|l|c|c|}
+\hline
+\textbf{Metric (Average)} & \textbf{Standard RRT} & \textbf{Safe RRT} \\
+\hline
+Success Rate & 100\% & 100\% \\
+Planning Time (s) & 0.017 & \textbf{0.012} \\
+Path Length (nodes) & \textbf{19.9} & 20.2 \\
+Tree Size (total nodes) & 59.3 & \textbf{42.4} \\
+\hline
+\end{tabular}
+\end{table}
+
+
+
+\subsection{Discussion}
+The experimental results consistently demonstrate that, across both search-based and sampling-based planners, enforcing RCI-based constraints not only guarantees robustness but also significantly improves \emph{online planning efficiency}. By shifting the heavy burden of robust safety verification to a one-time offline computation, our framework provides a practical and principled solution to planning in the presence of uncertainty.
+
+\section{Conclusion}
+\label{sec:conclusion}
+
+In this paper, we introduced a novel framework that enhances classical path-planning algorithms with provable safety guarantees by leveraging the power of Robust Control Invariant Sets (RCIS). We addressed the critical limitation of popular planners like A* and RRT, whose performance degrades under model uncertainty and external disturbances. Our core contribution is a practical methodology that decouples the computationally intensive safety analysis from the online planning phase. By pre-computing the maximal RCIS and a corresponding Safe Action Set, we provide planners with an efficient, constant-time mechanism to verify and enforce robust safety during execution.
+
+Our experiments demonstrated the effectiveness of this approach. The proposed Safe A* and Safe RRT algorithms not only generated paths with superior safety margins but also exhibited significant improvements in computational efficiency. Safe A* achieved an order-of-magnitude speedup in planning time, while Safe RRT reduced search effort by nearly 30\% by intelligently pruning unsafe regions of the state space. These results validate that integrating formal, set-theoretic methods does not merely add a layer of safety but can also act as a powerful heuristic to streamline the planning process.
+
+Future work will proceed along several promising directions. First, while effective, the grid-based RCIS computation faces scalability challenges with higher-dimensional systems. We plan to explore more scalable techniques, such as symbolic methods or function approximation, to extend our framework to more complex dynamics. Second, the current approach assumes a static environment; future research will focus on developing methods for efficiently updating the RCIS or adapting the safe action set in response to dynamic obstacles. Finally, we aim to validate the proposed framework on physical hardware to demonstrate its real-world applicability and robustness in safety-critical robotic applications.
+
+% ==============================  References  ==============================
+\begin{thebibliography}{99}
+
+\bibitem{lavalle2006planning}
+S.~M.~LaValle, \emph{Planning Algorithms}.  
+Cambridge, U.K.: Cambridge Univ.~Press, 2006.
+
+\bibitem{elbanhawi2014sampling}
+M.~Elbanhawi and M.~Simic, ``Sampling--based robot motion planning: A review,'' 
+\emph{IEEE Access}, vol.~2, pp.~56--77, 2014.
+
+\bibitem{rakovic2005invariant}
+S.~V.~Rakovi{\'c}, E.~C.~Kerrigan, K.~I.~Kouramas, and D.~Q.~Mayne,  
+``Invariant set based fuzzy control of constrained nonlinear systems,''  
+\emph{Automatica}, vol.~41, no.~10, pp.~1767--1773, Oct.~2005.
+
+\bibitem{rungger2016computing}
+M.~Rungger and P.~Tabuada, ``Computing robust controlled invariant sets of linear systems,''  
+\emph{IEEE Trans.\ Autom.\ Control}, vol.~62, no.~7, pp.~3655--3660, Jul.~2017.
+
+\bibitem{danielson2020motion}
+C.~Danielson, K.~Berntorp, S.~Di~Cairano, and A.~Weiss,  
+``Motion--planning for unicycles using the invariant--set motion--planner,''  
+in \emph{Proc.\ Amer.\ Control Conf.\ (ACC)}, Denver, CO, USA, 2020,  
+pp.~3636--3643.
+
+\bibitem{danielson2022invariant}
+C.~Danielson, ``Invariant configuration--space bubbles for revolute serial-chain robots,''  
+\emph{IEEE Control Syst.\ Lett.}, vol.~7, pp.~1015--1020, 2023.
+
+\bibitem{vaskov2019guaranteed}
+S.~Vaskov, U.~Sharma, S.~Kousik, M.~Johnson-Roberson, and R.~Vasudevan,  
+``Guaranteed safe reachability-based trajectory design for a high-fidelity model of an autonomous passenger vehicle,''  
+in \emph{Proc.\ Amer.\ Control Conf.\ (ACC)}, Philadelphia, PA, USA, 2019,  
+pp.~3644--3651.
+
+\bibitem{pek2021fail}
+C.~Pek and M.~Althoff, ``Fail-safe motion planning for online verification of autonomous vehicles using convex optimization,''  
+\emph{IEEE Trans.\ Robot.}, vol.~37, no.~3, pp.~798--814, Jun.~2021.
+
+\bibitem{ames2019control}
+A.~D.~Ames \emph{et~al.}, ``Control barrier functions: Theory and applications,''  
+in \emph{Proc.\ 18th Eur.\ Control Conf.\ (ECC)}, Naples, Italy, 2019,  
+pp.~3420--3431.
+
+\bibitem{wang2017safety}
+L.~Wang, A.~D.~Ames, and M.~Egerstedt,  
+``Safety-critical control of robotic systems with control barrier functions,''  
+\emph{IEEE Robot.\ Autom.\ Lett.}, vol.~2, no.~2, pp.~1098--1104, Apr.~2017.
+
+\end{thebibliography}
+
+\end{document}

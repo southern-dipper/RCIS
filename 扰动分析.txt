@@ -1,0 +1,60 @@
+\textcolor{red}{I'm a bit confused about how to clearly define the range of disturbances that can ensure safety.}\\
+
+Real-world agents operate under uncertainties from sources such as sensor noise, model inaccuracies, and environmental variations. We model the cumulative effect of these factors using a bounded disturbance set $\mathcal{W}$, which is characterized by:
+\begin{equation}
+\mathcal{W} = \{\mathbf{w} \in \mathbb{R}^n : |\mathbf{w}_i| \leq \epsilon_i, \forall i=1,\ldots,n \}
+\label{eq:disturbance_set}
+\end{equation}
+where the vector $\boldsymbol{\epsilon} = [\epsilon_1, \ldots, \epsilon_n]^T$ defines the maximum disturbance magnitude in each state dimension.
+
+For a safety guarantee to be robust, the magnitude of the disturbance model must be meaningfully related to the discretization of the state space. We enforce the condition:
+\begin{equation}
+\epsilon_i \geq \alpha \cdot \Delta x_i, \quad \text{with } \alpha \geq 0.5
+\label{eq:robustness_condition}
+\end{equation}
+This crucial relationship ensures that under the worst-case disturbance $\epsilon_i$, the system can be pushed from its nominal position within a cell to any point within that same cell, or even a slight crossing of the border. By designing the safety margin to be at least half the cell width, we guarantee that if the nominal next state is in cell $C_j$, the true state can be robustly contained within the union of $C_j$ and its immediate neighbors. This forms the cornerstone of ensuring robustness across a discretized state space.
+\subsubsection*{Linking Discretisation Error and Physical Disturbance}
+The safety-set computation described above assumes that the
+nominal state $x$ lies at the geometric centre $c(C_k)$ of a cell
+$C_k$.  In reality the embodied agent may start from \emph{any}
+point inside $C_k$.  We therefore decompose the total disturbance
+in~\eqref{eq:disturbance_set} into two parts:
+\begin{equation}
+\mathbf w \;=\; \underbrace{\mathbf w_{\!\Delta}}_{\text{discretisation}}
+\;+ \;
+\underbrace{\tilde{\mathbf w}}_{\text{physical}},
+\label{eq:disturbance_split}
+\end{equation}
+where
+\begin{align}
+|\mathbf w_{\!\Delta,i}| &\;\le\; \tfrac{1}{2}\,\Delta x_i,
+&\text{(offset from cell centre)} \nonumber\\[2pt]
+|\tilde{\mathbf w}_i| &\;\le\; \tilde\epsilon_i,
+&\text{(sensor/model/environment)} \nonumber
+\end{align}
+
+\paragraph*{Unified bound.}
+Selecting
+\begin{equation}
+\epsilon_i \;=\; \tfrac{1}{2}\,\Delta x_i \;+\; \tilde\epsilon_i,
+\label{eq:epsilon_choice}
+\end{equation}
+makes $\mathcal W$ in~\eqref{eq:disturbance_set} the \emph{Minkowski
+sum} of the deterministic discretisation error box and the
+stochastic/physical disturbance box.  Thus the planner is guaranteed
+to be robust not only to modelling uncertainties but also to the worst
+possible initial offset inside each cell.
+
+\paragraph*{Neighbourhood containment.}
+With the choice~\eqref{eq:epsilon_choice}, the worst-case successor
+state of any $x\in C_k$ under any admissible action $a\in\mathcal A$
+is confined to
+\[
+C_j \,\cup\, \mathcal N(C_j),
+\]
+where $C_j$ is the nominal successor cell produced by the planner and
+$\mathcal N(\cdot)$ denotes the 1-neighbourhood (cells sharing a face
+with $C_j$).  This property is the cornerstone of the \emph{robust
+positively invariant set} construction used in next section,
+because it elevates a centre-based abstraction to a guarantee that
+holds for \emph{all} real states contained in each grid cell.

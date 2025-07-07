@@ -10,23 +10,23 @@ plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'DejaVu Sans']  
 plt.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
 # --- 1. 环境与模型定义 ---
 # Unicycle模型参数  
-V = 1.0 
+V = 0.99 
 DT = 1.0
 # 状态空间 S = [x, y, theta] - 优化后的网格（平衡精度与计算效率）
 X_MIN, X_MAX, X_STEP = -1, 11, 0.5  
 Y_MIN, Y_MAX, Y_STEP = -1, 11, 0.5    
 THETA_MIN, THETA_MAX, THETA_STEP = -np.pi, np.pi, np.pi / 8  # 角度分辨率
 # 动作空间 A = [omega]
-OMEGA_MIN, OMEGA_MAX, OMEGA_STEP = -np.pi / 4, np.pi / 4, np.pi / 8 # 动作空间
+OMEGA_MIN, OMEGA_MAX, OMEGA_STEP = -np.pi *3/ 8, np.pi *3/ 8, np.pi / 8 # 动作空间
 
 x_space = np.linspace(X_MIN, X_MAX, int((X_MAX - X_MIN) / X_STEP) + 1)
-y_space = np.linspace(Y_MIN, Y_MAX, int((Y_MAX - Y_MIN) / Y_STEP) + 1)
+y_space = np.linspace(Y_MIN, Y_MAX, int((Y_MAX - Y_MIN) / Y_STEP) + 1) 
 theta_space = np.linspace(THETA_MIN, THETA_MAX, int((THETA_MAX - THETA_MIN) / THETA_STEP) + 1)[:-1]
 omega_space = np.linspace(OMEGA_MIN, OMEGA_MAX, int((OMEGA_MAX - OMEGA_MIN) / OMEGA_STEP) + 1)
 
 # *** 定义扰动空间 W - 优化版本 ***
 # 定义扰动集：只测试四个角点
-epsilon = 1e-3  
+epsilon = -1e-3   
 wx_space = np.array([-X_STEP/2+1e-3, X_STEP/2-1e-3])
 wy_space = np.array([-Y_STEP/2+1e-3, Y_STEP/2-1e-3])
 wtheta_space = np.array([0.0])  # 暂不考虑角度扰动
@@ -82,7 +82,7 @@ def check_path_collision(start_state, end_state, obstacle_indices):
     
     # 使用自适应采样密度：确保采样点间距小于网格对角线长度的一半
     grid_diagonal = np.sqrt(X_STEP**2 + Y_STEP**2)
-    sample_distance = grid_diagonal * 0.4  # 采样间距为网格对角线的40%
+    sample_distance = grid_diagonal * 0.2 # 采样间距为网格对角线的40%
     num_samples = max(int(np.ceil(path_length / sample_distance)), 2)
     
     # 检查路径上的采样点
@@ -453,9 +453,9 @@ def get_path_cells_and_trajectory(path_indices, came_from=None):
     return path_cells, continuous_trajectory
 
 def create_original_path_visualization(S_infinity, obstacle_indices, baseline_path, robust_path, start_continuous, goal_continuous, safe_angle_count):
-    """路径规划可视化 - 支持双路径对比显示"""
-    # 创建大图，增大尺寸和DPI
-    fig, ax = plt.subplots(figsize=(16, 12), dpi=150)
+    """Path planning visualization - supports dual path comparison"""
+    # Create figure with smaller size for better coordinate display
+    fig, ax = plt.subplots(figsize=(6, 6), dpi=300)
     
     max_angles = len(theta_space)
     
@@ -492,24 +492,21 @@ def create_original_path_visualization(S_infinity, obstacle_indices, baseline_pa
                    extent=[X_MIN - X_STEP/2, X_MAX + X_STEP/2, 
                            Y_MIN - Y_STEP/2, Y_MAX + Y_STEP/2])
     
-    # 添加颜色条
-    cbar = plt.colorbar(im, ax=ax, shrink=0.8)
-    cbar.set_label('鲁棒安全角度数', rotation=270, labelpad=20)
-      # 绘制基线A*路径
+      # Draw baseline A* path
     if baseline_path:
         # 获取完整的路径格子和连续轨迹
         baseline_cells, baseline_trajectory = get_path_cells_and_trajectory(baseline_path)
         
-        # 绘制基线A*的连续轨迹
+        # Plot baseline A* continuous trajectory
         trajectory_array = np.array(baseline_trajectory)
         ax.plot(trajectory_array[:, 0], trajectory_array[:, 1], 
-                color='#D32F2F', linewidth=3, label='标准A*轨迹', alpha=0.9)
+                color='#D32F2F', linewidth=3, label='Standard A*', alpha=0.9)
         
         # 绘制关键点
         path_states = np.array([indices_to_state(*p) for p in baseline_path])
         ax.plot(path_states[:, 0], path_states[:, 1], 
                 color='#F44336', marker='s', markersize=4, linewidth=0, 
-                label='标准A*路径点', alpha=0.8)
+                alpha=0.8)
     
     # 绘制鲁棒A*路径  
     if robust_path:
@@ -524,24 +521,24 @@ def create_original_path_visualization(S_infinity, obstacle_indices, baseline_pa
                 facecolor="#59A8F6FF", alpha=0.6, edgecolor="#5490F7FF", linewidth=1            )
             ax.add_patch(rect)
         
-        # 绘制实际的连续轨迹
+        # Plot actual continuous trajectory
         trajectory_array = np.array(robust_trajectory)
         ax.plot(trajectory_array[:, 0], trajectory_array[:, 1], 
-                color="#0741FF", linewidth=3, label='安全A*轨迹', alpha=0.9)
+                color="#0741FF", linewidth=3, label='Safe A*', alpha=0.9)
         
         # 绘制关键点
         path_states = np.array([indices_to_state(*p) for p in robust_path])
         ax.plot(path_states[:, 0], path_states[:, 1], 
                 color="#0521F1E9", marker='o', markersize=4, linewidth=0, 
-                label='安全A*路径点', alpha=0.8)
+                alpha=0.8)
         
         # 绘制方向箭头（每隔几个点绘制一个）
-        for i in range(0, len(path_states), 2):  # 每隔2个点绘制一个箭头
+        for i in range(0, len(path_states)):  # 每隔2个点绘制一个箭头
             state = path_states[i]
             ax.arrow(state[0], state[1],                     0.4 * np.cos(state[2]), 0.4 * np.sin(state[2]), 
                      head_width=0.2, head_length=0.2, fc="#070FFF", ec="#071CFF", alpha=0.8)
     
-    ax.plot(start_continuous[0], start_continuous[1], marker='o', color='green', markersize=12, label='起点')
+    ax.plot(start_continuous[0], start_continuous[1], marker='o', color='green', markersize=12, label='Start')
     
     # 绘制目标区域（3×3格子）
     goal_x, goal_y = goal_continuous[0], goal_continuous[1]
@@ -560,8 +557,8 @@ def create_original_path_visualization(S_infinity, obstacle_indices, baseline_pa
                 )
                 ax.add_patch(rect)
     
-    # 标记目标区域中心点
-    ax.plot(goal_continuous[0], goal_continuous[1], marker='*', color='gold', markersize=25, label='目标区域中心', markeredgecolor='black', markeredgewidth=2)
+    # Mark goal region center
+    ax.plot(goal_continuous[0], goal_continuous[1], marker='*', color='gold', markersize=25, label='Goal', markeredgecolor='black', markeredgewidth=2)
       # 添加网格线
     for x in x_space:
         ax.axvline(x - X_STEP/2, color='gray', linewidth=0.5, alpha=0.7)
@@ -570,34 +567,39 @@ def create_original_path_visualization(S_infinity, obstacle_indices, baseline_pa
         ax.axhline(y - Y_STEP/2, color='gray', linewidth=0.5, alpha=0.7)
         ax.axhline(y + Y_STEP/2, color='gray', linewidth=0.5, alpha=0.7)
     
-    ax.set_xticks(x_space[::2])
-    ax.set_yticks(y_space[::2])
-      # 创建图例元素
+    # Add grid lines with larger tick spacing for better readability
+    ax.set_xticks(x_space[::4])  # Show every 4th tick
+    ax.set_yticks(y_space[::4])  # Show every 4th tick
+    ax.tick_params(axis='both', which='major', labelsize=12)  # Larger tick labels
+    
+    # Create legend elements
     legend_patches = [
-        patches.Patch(color='#000000', label='障碍物'),
-        patches.Patch(color='#59A8F6FF', label='路径覆盖'),
-        patches.Patch(color='gold', alpha=0.3, label='目标区域 (3×3)')
+        patches.Patch(color='#000000', label='Obstacles'),
+        patches.Patch(color='#59A8F6FF', label='Path'),
+        patches.Patch(color='gold', alpha=0.3, label='Goal Region')
     ]
-      # 获取线条图例
+    
+    # Get line legend
     handles, labels = ax.get_legend_handles_labels()
-    # 将图例放在图形外部右侧
-    ax.legend(handles=handles + legend_patches, fontsize=14,markerscale=0.8,
-             bbox_to_anchor=(1.35, 1), loc='upper left')
+    # Place legend inside the figure with transparency
+    ax.legend(handles=handles + legend_patches, fontsize=10, markerscale=0.8,
+             loc='upper left', framealpha=0.8, fancybox=True, shadow=True)
     ax.set_xlim(X_MIN - 1, X_MAX + 1)
     ax.set_ylim(Y_MIN - 1, Y_MAX + 1)
     ax.set_aspect('equal', adjustable='box')
-    ax.set_title('基于安全状态转移图的独轮车路径规划', fontsize=16, fontweight='bold')
+    ax.set_xlabel('X', fontsize=14)
+    ax.set_ylabel('Y', fontsize=14)
     plt.tight_layout()
     
-    # 保存高分辨率图片
+    # Save high resolution image
     plt.savefig('path_planning_comparison.png', dpi=300, bbox_inches='tight', facecolor='white')
     plt.show()
 
 def create_safety_angle_visualization(S_infinity, obstacle_indices, start_continuous, goal_continuous):
-    """创建安全角度箭头可视化图 - 展示θ维度信息"""
+    """Create safety angle arrow visualization - shows θ dimension information"""
     
-    # 创建超大图形以便看清箭头
-    fig, ax = plt.subplots(figsize=(20, 16), dpi=150)
+    # Create smaller figure for better coordinate display
+    fig, ax = plt.subplots(figsize=(8, 8), dpi=300)
     
     # 计算每个位置的安全角度
     position_safety = {}
@@ -655,11 +657,11 @@ def create_safety_angle_visualization(S_infinity, obstacle_indices, start_contin
                         end_x - start_x, end_y - start_y,
                         head_width=arrow_length*0.4, 
                         head_length=arrow_length*0.3,
-                        fc=color, ec=color, alpha=alpha, width=width)    # 绘制起点和终点
+                        fc=color, ec=color, alpha=alpha, width=width)    # Draw start and end points
     ax.plot(start_continuous[0], start_continuous[1], 
-            marker='o', color='blue', markersize=20, label='起点', markeredgecolor='white', markeredgewidth=3)
+            marker='o', color='blue', markersize=16, label='Start', markeredgecolor='white', markeredgewidth=2)
     ax.plot(goal_continuous[0], goal_continuous[1], 
-            marker='*', color='gold', markersize=25, label='终点', markeredgecolor='black', markeredgewidth=2)
+            marker='*', color='gold', markersize=20, label='Goal', markeredgecolor='black', markeredgewidth=2)
     
     # 添加网格线（更细的线）
     for x in x_space:
@@ -667,30 +669,33 @@ def create_safety_angle_visualization(S_infinity, obstacle_indices, start_contin
         ax.axvline(x + X_STEP/2, color='lightgray', linewidth=0.5, alpha=0.7)
     for y in y_space:
         ax.axhline(y - Y_STEP/2, color='lightgray', linewidth=0.5, alpha=0.7)
-        ax.axhline(y + Y_STEP/2, color='lightgray', linewidth=0.5, alpha=0.7)    # 创建图例
+        ax.axhline(y + Y_STEP/2, color='lightgray', linewidth=0.5, alpha=0.7)    # Create legend
     legend_elements = [
-        patches.Patch(color='green', alpha=0.8, label='安全角度（θ维度）'),
-        patches.Patch(color='red', alpha=0.6, label='不安全角度'),
-        patches.Patch(color='black', label='障碍物')
+        patches.Patch(color='green', alpha=0.8, label='Safe Angle'),
+        patches.Patch(color='red', alpha=0.6, label='Unsafe Angle'),
+        patches.Patch(color='black', label='Obstacle', alpha=0.8),
     ]
     
-    # 获取起点终点图例
+    # Get start/end point legend
     handles, labels = ax.get_legend_handles_labels()
-      # 设置图形属性
-    ax.legend(handles=handles + legend_elements, fontsize=14, markerscale=0.8,
-             bbox_to_anchor=(1.02, 1), loc='upper left')
+    
+    # Set figure properties with larger tick spacing and labels
+    ax.set_xticks(x_space[::4])  # Show every 4th tick
+    ax.set_yticks(y_space[::4])  # Show every 4th tick
+    ax.tick_params(axis='both', which='major', labelsize=12)  # Larger tick labels
+    
+    # Place legend inside the figure
+    ax.legend(handles=handles + legend_elements, fontsize=10, markerscale=0.8,
+             loc='lower right', framealpha=0.8, fancybox=True, shadow=True)
     ax.set_xlim(X_MIN - 1, X_MAX + 1)
     ax.set_ylim(Y_MIN - 1, Y_MAX + 1)
     ax.set_aspect('equal', adjustable='box')
-    ax.set_title('安全角度可视化图 - θ维度展示\n'
-                '绿色箭头：安全方向，红色箭头：不安全方向', 
-                fontsize=18, fontweight='bold')
-    ax.set_xlabel('X坐标', fontsize=14)
-    ax.set_ylabel('Y坐标', fontsize=14)
+    ax.set_xlabel('X', fontsize=14)
+    ax.set_ylabel('Y', fontsize=14)
     
     plt.tight_layout()
     
-    # 保存超高分辨率图片
+    # Save ultra high resolution image
     plt.savefig('safe_angle_arrows.png', dpi=300, bbox_inches='tight', facecolor='white')
     plt.show()
 
@@ -706,16 +711,37 @@ if __name__ == "__main__":
     # 生成简单的障碍物
     obstacle_indices = set()
     
-    # 添加一些简单的障碍物
-    for i in range(4, 16):
-        obstacle_indices.add((i, 18))  # 水平障碍
-    for i in range(6, 16):
-        obstacle_indices.add((i, 7)) 
-    for j in range(8, 19):
-        obstacle_indices.add((18, j))  # 垂直障碍    obstacle_indices.add((4, 16))
-    obstacle_indices.add((3,17))
-    obstacle_indices.add((5,17))
-      
+    # # 添加一些简单的障碍物
+    # for i in range(4, 16):
+    #     obstacle_indices.add((i, 18))  # 水平障碍
+    # for i in range(6, 16):
+    #     obstacle_indices.add((i, 7)) 
+    # for j in range(8, 19):
+    #     obstacle_indices.add((18, j))  # 垂直障碍    obstacle_indices.add((4, 16))
+    # obstacle_indices.add((3,17))
+    # obstacle_indices.add((5,17))
+     # 添加一些简单的障碍物
+    for i in range(8, 22):
+        obstacle_indices.add((i, 15))  # 水平障碍
+    for i in range(8, 18):
+        obstacle_indices.add((i, 11)) 
+    for i in range(11, 19):
+        obstacle_indices.add((i, 7))
+    for i in range(11, 22):
+        obstacle_indices.add((i, 3))
+    for i in range(0,4):
+        obstacle_indices.add((i, 23))
+    for i in range(1,4):
+        obstacle_indices.add((i, 19))  
+    
+    for j in range(11, 16):
+        obstacle_indices.add((7, j))  # 垂直障碍
+    for j in range(3, 16):
+        obstacle_indices.add((22, j))  # 垂直障碍    
+    for j in range(4, 7):
+        obstacle_indices.add((11, j))  # 垂直障碍 
+    for j in range(19,24):
+        obstacle_indices.add((4, j)) 
     # 1. 计算鲁棒安全集
     S_infinity, safe_actions_map = compute_robust_safe_set_optimized(obstacle_indices, W)
 
