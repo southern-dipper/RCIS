@@ -1,0 +1,29 @@
+cff-version: 1.2.0
+message: "如果本项目对您的研究有所帮助，请引用以下论文。"
+type: software
+authors:
+  - family-names: Song
+    given-names: Ziyu
+  - family-names: Li
+    given-names: Nan
+  - family-names: Li
+    given-names: Yutong
+  - family-names: Chen
+    given-names: Hong
+title: "RCI-Enhanced Planning for Safety-Critical Embodied Intelligent Agents"
+preferred-citation:
+  type: conference-paper
+  authors:
+    - family-names: Song
+      given-names: Ziyu
+    - family-names: Li
+      given-names: Nan
+    - family-names: Li
+      given-names: Yutong
+    - family-names: Chen
+      given-names: Hong
+  title: "RCI-Enhanced Planning for Safety-Critical Embodied Intelligent Agents"
+  booktitle: "2025 9th CAA International Conference on Vehicular Control and Intelligence (CVCI)"
+  year: 2025
+  pages: "1-6"
+  doi: "10.1109/CVCI66304.2025.11348492"

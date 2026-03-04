@@ -73,6 +73,7 @@ env/
 *.zip
 *.pptx
 *.docx
+paper.tex
 
 # Temporary files
 *.tmp
