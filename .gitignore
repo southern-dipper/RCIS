@@ -67,6 +67,13 @@ Thumbs.db
 ehthumbs.db
 Desktop.ini
 
+# RPIS 项目本地环境和大文件
+env/
+*.pdf
+*.zip
+*.pptx
+*.docx
+
 # Temporary files
 *.tmp
 *.temp
